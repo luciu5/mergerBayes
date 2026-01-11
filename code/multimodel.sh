@@ -21,4 +21,5 @@ export MKL_NUM_THREADS=$STAN_NUM_THREADS
 export OMP_NUM_THREADS=$STAN_NUM_THREADS
 
 # Run the R script with model number and thread count
-srun Rscript ${HOME}/supreme/code/bayes/bayesian.R ${SLURM_ARRAY_TASK_ID} $STAN_NUM_CHAINS  $STAN_NUM_THREADS
+# Update this path to match your actual project location
+srun Rscript code/bayesian.R ${SLURM_ARRAY_TASK_ID} $STAN_NUM_CHAINS  $STAN_NUM_THREADS
