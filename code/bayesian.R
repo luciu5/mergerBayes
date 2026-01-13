@@ -45,9 +45,9 @@ outfile <- file.path(datadir, paste0("stan_hhiperform_", model_name[thismodel], 
 # Load 2010-2020 bank merger data
 load(file = file.path(datadir, "banksimdata.RData"))
 
-# Filter for a single year (2013) for local testing
-# COMMENT OUT FOR PRODUCTION RUN:
-# simdata <- simdata %>% filter(year == 2013)
+# Filter for most recent 5 years (2016-2020) to reduce dimensionality
+# This significantly reduces N_event and N_tophold for faster convergence
+simdata <- simdata %>% filter(year >= 2016)
 
 # Clean and process data for the Stan model
 simdata <- simdata %>%
@@ -61,7 +61,7 @@ simdata <- simdata %>%
     shareIn = deposit_share,
     # Convert percentage margin (e.g. 5.5) to decimal (0.055)
     margin = selected_margin / 100,
-    rate_deposits = rate_call_report,
+    rate_deposits = rate_call_report / 100,
     # Set proxy for missing loan_rate (cost shifter)
     rate_loans = 0
   ) %>%
@@ -149,7 +149,7 @@ system.time(fit <- sampling(
   init = 0,
   iter = 7000,
   warmup = 1500,
-  control = list(adapt_delta = 0.90, max_treedepth = 12)
+  control = list(adapt_delta = 0.95, max_treedepth = 13)
 ))
 
 # Build parameter lists for summaries

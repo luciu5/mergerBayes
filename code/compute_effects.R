@@ -15,8 +15,8 @@ if (!dir.exists(resdir)) dir.create(resdir, recursive = TRUE)
 load(file.path(datadir, "banksimdata.RData"))
 
 # IMPORTANT: Apply the SAME filtering as bayesian.R to ensure alignment
-# Filter for single year if testing (comment out for full run)
-simdata <- simdata %>% filter(year == 2013)
+# Filter for 2016-2020 (same as model estimation)
+simdata <- simdata %>% filter(year >= 2016)
 
 # Clean and process data EXACTLY as in bayesian.R
 simdata <- simdata %>%
@@ -29,7 +29,7 @@ simdata <- simdata %>%
         # Map variables to names used in bayesian.R/stan
         shareIn = deposit_share,
         margin = selected_margin / 100,
-        rate_deposits = rate_call_report
+        rate_deposits = rate_call_report / 100
     ) %>%
     mutate(margin = ifelse(margin <= 0, NA, margin)) %>%
     filter(!is.na(margin)) %>%

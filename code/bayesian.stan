@@ -15,6 +15,7 @@ functions {
                         vector cutoff_share, real gamma_loan,
                         // --- SCALARS ---
                         real sigma_logshare, real sigma_margin, real rho,
+                        real rateDiff_sd,
                         int supply_model, int use_cutoff) {
     
     real lp = 0;
@@ -56,8 +57,11 @@ functions {
       
       // Conduct Logic (Inverse Form)
       if (supply_model == 1) { 
+        // Structural alpha = a / sd_rate (scales standardized coefficient to proportions)
+        real alpha_structural = a / rateDiff_sd;
+        
         // BERTRAND: 1/m = alpha * (1 - s(1-s0))
-        inv_markup = a * (w + (1-w) * (1.0 - s * (1.0 - s_out)));
+        inv_markup = alpha_structural * (w + (1-w) * (1.0 - s * (1.0 - s_out)));
         
       } else if (supply_model == 2) { 
         // AUCTION: 1/m = alpha * (-log(1-denom)/s)
@@ -65,16 +69,22 @@ functions {
         if (denom > 0.99) denom = 0.99;
         real log_term = -log(1.0 - denom);
         
-        if (s < 0.001) inv_markup = a * (w + (1-w)); 
-        else inv_markup = a * (w - (1-w) * (denom / log_term));
+        real alpha_structural = a / rateDiff_sd;
+        
+        if (s < 0.001) inv_markup = alpha_structural * (w + (1-w)); 
+        else inv_markup = alpha_structural * (w - (1-w) * (denom / log_term));
         
       } else if (supply_model == 3) {
+        real alpha_structural = a / rateDiff_sd;
+        
         // COURNOT: 1/m = alpha / (1 + s/s0)
-        inv_markup = a * (w + (1-w) * (s_out / (s_out + s) ));
+        inv_markup = alpha_structural * (w + (1-w) * (s_out / (s_out + s) ));
         
       } else {
+        real alpha_structural = a / rateDiff_sd;
+        
         // MONOPOLISTIC COMP: 1/m = alpha
-        inv_markup = a;
+        inv_markup = alpha_structural;
       }
       
       // Cost Shifter Included: (Deposit Opportunity Cost)
@@ -193,16 +203,20 @@ transformed parameters {
 }
 
 model {
-  // --- PRIORS ---
-  mu_year_demand ~ std_normal(); sigma_year_demand ~ normal(0, 0.2); year_raw_demand ~ std_normal();
-  mu_year_supply ~ std_normal(); sigma_year_supply ~ normal(0, 0.2); year_raw_supply ~ std_normal();
+  // --- RELAXED PRIORS (improved for convergence) ---
+  // Year effects - keep these relatively tight
+  mu_year_demand ~ std_normal(); sigma_year_demand ~ normal(0, 0.5); year_raw_demand ~ std_normal();
+  mu_year_supply ~ std_normal(); sigma_year_supply ~ normal(0, 0.5); year_raw_supply ~ std_normal();
   
-  mu_log_a ~ normal(-0.5, 0.5); sigma_log_a ~ normal(0, 0.2); r_event_a_raw ~ std_normal();
+  // Alpha (price coefficient) - RELAXED: was normal(-0.5, 0.5)
+  mu_log_a ~ normal(0, 1); sigma_log_a ~ normal(0, 0.5); r_event_a_raw ~ std_normal();
   
-  mu_b_event ~ normal(0, 1); sigma_b_event ~ normal(0, 0.2); b_event_raw ~ std_normal();
-  mu_b_tophold ~ normal(0, 1); sigma_b_tophold ~ normal(0, 0.2); b_tophold_raw ~ std_normal();
+  // Market and bank fixed effects - RELAXED: was normal(0, 0.2)
+  mu_b_event ~ normal(0, 1); sigma_b_event ~ normal(0, 0.5); b_event_raw ~ std_normal();
+  mu_b_tophold ~ normal(0, 1); sigma_b_tophold ~ normal(0, 0.5); b_tophold_raw ~ std_normal();
   
-  logit_mu_s0 ~ normal(-1, 0.5); tau_s0 ~ normal(0, 0.2); 
+  // Outside share - RELAXED tau: was normal(0, 0.2)
+  logit_mu_s0 ~ normal(-1, 0.5); tau_s0 ~ normal(0, 0.5); 
   beta_deposits ~ normal(0, 0.5); beta_assets ~ normal(0, 0.5); s0_raw ~ std_normal();
   
   if (use_cutoff == 1) cutoff_share ~ beta(3, 30);
@@ -211,8 +225,9 @@ model {
   
   // Correlation
   Lrescor ~ lkj_corr_cholesky(4.0); 
-  sigma_logshare ~ normal(0, 2);
-  sigma_margin ~ normal(0, 10); 
+  // Outcome variances - RELAXED: was normal(0, 2) and normal(0, 10)
+  sigma_logshare ~ normal(0, 3);
+  sigma_margin ~ normal(0, 15); 
 
 
     
@@ -224,6 +239,7 @@ model {
     a_event, b_event, b_tophold_scaled, s0, 
     year_effect_demand, year_effect_supply, cutoff_share, gamma_loan,
     sigma_logshare, sigma_margin, rho,
+    rateDiff_sd,
     supply_model, use_cutoff
   );
  
@@ -258,21 +274,21 @@ generated quantities {
        real s_out = inv_logit(s0[e]);
        if (s_out < 0.01) s_out = 0.01;
        
-       real a = a_event[e];
        real inv_markup;
+       real alpha_structural = a_event[e] / rateDiff_sd;
        
        if (supply_model == 1) { 
-         inv_markup = a * (w + (1-w) * (1 - s * (1 - s_out)));
+         inv_markup = alpha_structural * (w + (1-w) * (1 - s * (1 - s_out)));
        } else if (supply_model == 2) { 
          real denom = s * (1 - s_out);
          if (denom > 0.99) denom = 0.99;
          real log_term = -log(1.0 - denom);
-         if (s < 0.001) inv_markup = a * (w + (1-w));
-         else inv_markup = a * (w - (1-w) * (denom / log_term ));
+         if (s < 0.001) inv_markup = alpha_structural * (w + (1-w));
+         else inv_markup = alpha_structural * (w - (1-w) * (denom / log_term ));
        } else if (supply_model == 3) {
-         inv_markup = a * (w + (1-w) * (s_out / (s_out + s) ));
+         inv_markup = alpha_structural * (w + (1-w) * (s_out / (s_out + s) ));
        } else {
-         inv_markup = a;
+         inv_markup = alpha_structural;
        }
        
        inv_markup_pred[n] = inv_markup;
