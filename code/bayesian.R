@@ -45,9 +45,8 @@ outfile <- file.path(datadir, paste0("stan_hhiperform_", model_name[thismodel], 
 # Load 2010-2020 bank merger data
 load(file = file.path(datadir, "banksimdata.RData"))
 
-# Filter for most recent 5 years (2016-2020) to reduce dimensionality
-# This significantly reduces N_event and N_tophold for faster convergence
-simdata <- simdata %>% filter(year >= 2016)
+# Filter for LAST YEAR ONLY (2020) - Production Run
+simdata <- simdata %>% filter(year == 2020)
 
 # Clean and process data for the Stan model
 simdata <- simdata %>%

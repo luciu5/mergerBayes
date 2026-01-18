@@ -6,8 +6,8 @@ library(rstan)
 datadir <- file.path("data")
 
 # Load results from all four models
-models <- c("bertrand", "cournot", "auction", "moncom")
-model_labels <- c("Bertrand", "Cournot", "Auction (2nd)", "Monopolistic Competition")
+models <- c("bertrand", "2nd", "cournot", "moncom")
+model_labels <- c("Bertrand", "Auction (2nd)", "Cournot", "Monopolistic Competition")
 n_models <- length(models)
 
 fits <- vector("list", n_models)

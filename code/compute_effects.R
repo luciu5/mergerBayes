@@ -14,9 +14,10 @@ if (!dir.exists(resdir)) dir.create(resdir, recursive = TRUE)
 # Load merger data
 load(file.path(datadir, "banksimdata.RData"))
 
-# IMPORTANT: Apply the SAME filtering as bayesian.R to ensure alignment
-# Filter for 2016-2020 (same as model estimation)
-simdata <- simdata %>% filter(year >= 2016)
+# Filter for 2020 and specific 10 mergers (MATCHING BAYESIAN.R)
+simdata <- simdata %>% filter(year == 2020)
+target_events <- c(2117, 2086, 2096, 2069, 2178, 2144, 2164, 2139, 2173, 2047)
+simdata <- simdata %>% filter(event_id %in% target_events)
 
 # Clean and process data EXACTLY as in bayesian.R
 simdata <- simdata %>%
@@ -46,7 +47,7 @@ rate_sd <- sd(simdata$rate_deposits, na.rm = TRUE)
 
 # Models to process for simulation
 # Note: moncom excluded from simulation since it predicts zero price effects
-models <- c("bertrand", "cournot", "auction")
+models <- c("bertrand", "cournot", "2nd")
 
 # Main processing loop
 for (m_name in models) {
@@ -77,7 +78,7 @@ for (m_name in models) {
     draw_subset <- sample(1:n_draws, min(50, n_draws))
 
     # Map supply type
-    supply_type <- m_name
+    supply_type <- ifelse(m_name == "2nd", "auction", m_name)
 
     # List to store all results
     all_results <- list()
