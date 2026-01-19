@@ -250,9 +250,10 @@ generated quantities {
   real rho_gen = Rescor[1, 2];
   
   vector[N] log_lik;
-  vector[N] inv_markup_pred;
+  // REMOVED: vector[N] inv_markup_pred; to save memory (~2.5GB reduction)
+  int<lower=0> neg_margin_count = 0;
   
-  // Replicate logic for LOO
+  // Replicate logic for LOO and negative margin counting
   {
      real sigma_cond = sigma_margin * sqrt(1.0 - square(rho));
      real slope_cond = rho * (sigma_margin / sigma_logshare);
@@ -291,7 +292,10 @@ generated quantities {
          inv_markup = alpha_structural;
        }
        
-       inv_markup_pred[n] = inv_markup;
+       // Count negative margins directly here instead of saving vector
+       if (inv_markup < 0) {
+         neg_margin_count += 1;
+       }
        
        // Re-include loan_rate in Generated Quantities
        real mu2 = inv_markup + gamma_loan * loan_rate[n] + year_effect_supply[year[n]];

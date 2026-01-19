@@ -38,9 +38,9 @@ use_cutoff <- as.numeric(args[4])
 if (is.na(use_cutoff)) use_cutoff <- 0
 
 model_name <- c("bertrand", "2nd", "cournot", "moncom")
-directory <- file.path(Sys.getenv("HOME"), "Projects","mergerBayes")
-datadir <- file.path(directory,"data")
-modelpath <- file.path(directory,"code","bayesian.stan")
+directory <- file.path(Sys.getenv("HOME"), "Projects", "mergerBayes")
+datadir <- file.path(directory, "data")
+modelpath <- file.path(directory, "code", "bayesian.stan")
 outfile <- file.path(datadir, paste0("stan_hhiperform_", model_name[thismodel], ".RData"))
 
 # Load 2010-2020 bank merger data
@@ -48,7 +48,9 @@ load(file = file.path(datadir, "banksimdata.RData"))
 
 # Filter for most recent 5 years (2016-2020) to reduce dimensionality
 # This significantly reduces N_event and N_tophold for faster convergence
-simdata <- simdata %>% filter(year >= 2016 & year <= 2017)
+# Filter for 2014-2015 as requested
+# This significantly reduces N_event and N_tophold for faster convergence
+simdata <- simdata %>% filter(year >= 2014 & year <= 2015)
 
 # Clean and process data for the Stan model
 simdata <- simdata %>%
@@ -143,6 +145,14 @@ write_json(stan_data, file.path(datadir, "stan_data.json"), pretty = TRUE, auto_
 model <- stan_model(modelpath)
 
 # Sample from the posterior
+# Adjust adapt_delta for Cournot (model 3) which is more prone to divergences
+target_adapt_delta <- 0.95
+if (thismodel == 3) {
+  target_adapt_delta <- 0.99
+  cat("Increasing adapt_delta to 0.99 for Cournot model\n")
+}
+
+# Sample from the posterior
 system.time(fit <- sampling(
   model,
   data = stan_data,
@@ -150,7 +160,7 @@ system.time(fit <- sampling(
   init = 0,
   iter = 7000,
   warmup = 1500,
-  control = list(adapt_delta = 0.95, max_treedepth = 13)
+  control = list(adapt_delta = target_adapt_delta, max_treedepth = 13)
 ))
 
 # Build parameter lists for summaries
@@ -175,9 +185,10 @@ fit_sum <- try(summary(fit, pars = sum_pars)$summary)
 bridge <- try(bridge_sampler(fit, cores = thread_count))
 
 # Extract predicted margins for diagnostic
-margin_samples <- rstan::extract(fit, "inv_markup_pred")[[1]]
-neg_count <- sum(margin_samples < 0)
-cat("Number of negative predicted margins:", neg_count, "\n")
+# Extract predicted margins for diagnostic (now using the scalar count)
+neg_count_samples <- rstan::extract(fit, "neg_margin_count")[[1]]
+neg_count_mean <- mean(neg_count_samples)
+cat("Average number of negative predicted margins per draw:", neg_count_mean, "\n")
 
 # Save results
 save(fit, bridge, plot_sum, fit_sum, file = outfile)
