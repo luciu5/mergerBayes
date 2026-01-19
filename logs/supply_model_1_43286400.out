@@ -1,0 +1,110 @@
+Number of observations after filtering: 14488 
+N_event (market units): 321 
+N_tophold: 3037 
+N_year: 2 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 1).
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 2).
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 3).
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 4).
+Chain 3: 
+Chain 3: Gradient evaluation took 0.003906 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 39.06 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+Chain 4: 
+Chain 4: Gradient evaluation took 0.003511 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 35.11 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+Chain 2: 
+Chain 2: Gradient evaluation took 0.004487 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 44.87 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+Chain 3: Iteration:    1 / 7000 [  0%]  (Warmup)
+Chain 4: Iteration:    1 / 7000 [  0%]  (Warmup)
+Chain 2: Iteration:    1 / 7000 [  0%]  (Warmup)
+Chain 1: 
+Chain 1: Gradient evaluation took 0.005223 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 52.23 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+Chain 1: Iteration:    1 / 7000 [  0%]  (Warmup)
+Chain 2: Iteration:  700 / 7000 [ 10%]  (Warmup)
+Chain 1: Iteration:  700 / 7000 [ 10%]  (Warmup)
+Chain 3: Iteration:  700 / 7000 [ 10%]  (Warmup)
+Chain 4: Iteration:  700 / 7000 [ 10%]  (Warmup)
+Chain 2: Iteration: 1400 / 7000 [ 20%]  (Warmup)
+Chain 1: Iteration: 1400 / 7000 [ 20%]  (Warmup)
+Chain 4: Iteration: 1400 / 7000 [ 20%]  (Warmup)
+Chain 3: Iteration: 1400 / 7000 [ 20%]  (Warmup)
+Chain 2: Iteration: 1501 / 7000 [ 21%]  (Sampling)
+Chain 1: Iteration: 1501 / 7000 [ 21%]  (Sampling)
+Chain 4: Iteration: 1501 / 7000 [ 21%]  (Sampling)
+Chain 3: Iteration: 1501 / 7000 [ 21%]  (Sampling)
+Chain 2: Iteration: 2200 / 7000 [ 31%]  (Sampling)
+Chain 1: Iteration: 2200 / 7000 [ 31%]  (Sampling)
+Chain 4: Iteration: 2200 / 7000 [ 31%]  (Sampling)
+Chain 3: Iteration: 2200 / 7000 [ 31%]  (Sampling)
+Chain 2: Iteration: 2900 / 7000 [ 41%]  (Sampling)
+Chain 1: Iteration: 2900 / 7000 [ 41%]  (Sampling)
+Chain 4: Iteration: 2900 / 7000 [ 41%]  (Sampling)
+Chain 3: Iteration: 2900 / 7000 [ 41%]  (Sampling)
+Chain 2: Iteration: 3600 / 7000 [ 51%]  (Sampling)
+Chain 4: Iteration: 3600 / 7000 [ 51%]  (Sampling)
+Chain 1: Iteration: 3600 / 7000 [ 51%]  (Sampling)
+Chain 3: Iteration: 3600 / 7000 [ 51%]  (Sampling)
+Chain 2: Iteration: 4300 / 7000 [ 61%]  (Sampling)
+Chain 4: Iteration: 4300 / 7000 [ 61%]  (Sampling)
+Chain 1: Iteration: 4300 / 7000 [ 61%]  (Sampling)
+Chain 3: Iteration: 4300 / 7000 [ 61%]  (Sampling)
+Chain 2: Iteration: 5000 / 7000 [ 71%]  (Sampling)
+Chain 4: Iteration: 5000 / 7000 [ 71%]  (Sampling)
+Chain 1: Iteration: 5000 / 7000 [ 71%]  (Sampling)
+Chain 3: Iteration: 5000 / 7000 [ 71%]  (Sampling)
+Chain 2: Iteration: 5700 / 7000 [ 81%]  (Sampling)
+Chain 4: Iteration: 5700 / 7000 [ 81%]  (Sampling)
+Chain 1: Iteration: 5700 / 7000 [ 81%]  (Sampling)
+Chain 3: Iteration: 5700 / 7000 [ 81%]  (Sampling)
+Chain 2: Iteration: 6400 / 7000 [ 91%]  (Sampling)
+Chain 4: Iteration: 6400 / 7000 [ 91%]  (Sampling)
+Chain 1: Iteration: 6400 / 7000 [ 91%]  (Sampling)
+Chain 3: Iteration: 6400 / 7000 [ 91%]  (Sampling)
+Chain 2: Iteration: 7000 / 7000 [100%]  (Sampling)
+Chain 2: 
+Chain 2:  Elapsed Time: 3206.1 seconds (Warm-up)
+Chain 2:                11595.3 seconds (Sampling)
+Chain 2:                14801.4 seconds (Total)
+Chain 2: 
+Chain 4: Iteration: 7000 / 7000 [100%]  (Sampling)
+Chain 4: 
+Chain 4:  Elapsed Time: 3347.55 seconds (Warm-up)
+Chain 4:                11540 seconds (Sampling)
+Chain 4:                14887.5 seconds (Total)
+Chain 4: 
+Chain 1: Iteration: 7000 / 7000 [100%]  (Sampling)
+Chain 1: 
+Chain 1:  Elapsed Time: 3264.24 seconds (Warm-up)
+Chain 1:                11833.6 seconds (Sampling)
+Chain 1:                15097.9 seconds (Total)
+Chain 1: 
+Chain 3: Iteration: 7000 / 7000 [100%]  (Sampling)
+Chain 3: 
+Chain 3:  Elapsed Time: 3442.3 seconds (Warm-up)
+Chain 3:                11845.3 seconds (Sampling)
+Chain 3:                15287.6 seconds (Total)
+Chain 3: 
+      user     system    elapsed 
+383167.422   5860.061  16324.853 
+Iteration: 1
+Iteration: 2
+Number of negative predicted margins: 0 
+Model 1 failed with exit code 1 at Mon Jan 19 04:35:28 EST 2026
