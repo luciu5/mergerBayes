@@ -38,8 +38,9 @@ use_cutoff <- as.numeric(args[4])
 if (is.na(use_cutoff)) use_cutoff <- 0
 
 model_name <- c("bertrand", "2nd", "cournot", "moncom")
-datadir <- "data"
-modelpath <- "code/bayesian.stan"
+directory <- file.path(Sys.getenv("HOME"), "Projects","mergerBayes")
+datadir <- file.path(directory,"data")
+modelpath <- file.path(directory,"code","bayesian.stan")
 outfile <- file.path(datadir, paste0("stan_hhiperform_", model_name[thismodel], ".RData"))
 
 # Load 2010-2020 bank merger data
@@ -47,7 +48,7 @@ load(file = file.path(datadir, "banksimdata.RData"))
 
 # Filter for most recent 5 years (2016-2020) to reduce dimensionality
 # This significantly reduces N_event and N_tophold for faster convergence
-simdata <- simdata %>% filter(year >= 2016)
+simdata <- simdata %>% filter(year >= 2016 & year <= 2017)
 
 # Clean and process data for the Stan model
 simdata <- simdata %>%

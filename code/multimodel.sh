@@ -3,8 +3,8 @@
 #SBATCH --cpus-per-task=32     # 4 chains * 8 threads = 32 CPUs
 #SBATCH --mem=64G              # Increased memory from 16G to 64G for stability
 #SBATCH --time=48:00:00        # Added 48 hour time limit to prevent premature termination
-#SBATCH --output=logs/supply_model_%a_%j.out
-#SBATCH --error=logs/supply_model_%a_%j.err
+#SBATCH --output=supply_model_%a_%j.out
+#SBATCH --error=supply_model_%a_%j.err
 #SBATCH --array=1-4            # Adjusted to 1-4 (Bertrand, Auction, Cournot, MonCom)
 
 # Set number of chains and threads per chain
@@ -26,7 +26,7 @@ mkdir -p logs
 
 # Run the R script
 # Args: [model_id] [chains] [threads] [use_cutoff]
-srun Rscript code/bayesian.R ${SLURM_ARRAY_TASK_ID} $STAN_NUM_CHAINS $STAN_NUM_THREADS 0
+srun Rscript ${HOME}/Projects/mergerBayes/code/bayesian.R ${SLURM_ARRAY_TASK_ID} $STAN_NUM_CHAINS $STAN_NUM_THREADS 0
 
 # Quick status check after run
 if [ $? -eq 0 ]; then
