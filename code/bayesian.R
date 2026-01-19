@@ -160,6 +160,7 @@ system.time(fit <- sampling(
   init = 0,
   iter = 7000,
   warmup = 1500,
+  thin = 5, # Reduce saved draws by 5x (Save ~4400 total draws instead of 22000)
   control = list(adapt_delta = target_adapt_delta, max_treedepth = 13)
 ))
 

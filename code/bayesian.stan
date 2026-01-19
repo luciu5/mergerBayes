@@ -249,7 +249,9 @@ generated quantities {
   corr_matrix[2] Rescor = multiply_lower_tri_self_transpose(Lrescor);
   real rho_gen = Rescor[1, 2];
   
+  // Reverting to vector for LOO as requested
   vector[N] log_lik;
+  
   // REMOVED: vector[N] inv_markup_pred; to save memory (~2.5GB reduction)
   int<lower=0> neg_margin_count = 0;
   
