@@ -1,0 +1,25 @@
+# Logs directory (SLURM output)
+logs/
+*.out
+*.err
+
+# R Data files (large)
+data/*.RData
+data/*.rds
+data/*.json
+results/*.rds
+
+# Stan compilation files
+*.rds
+*.stan.d/
+
+# Temporary files
+*.tmp
+*~
+.Rhistory
+.RData
+
+# System files
+.DS_Store
+Thumbs.db
+.Rproj.user

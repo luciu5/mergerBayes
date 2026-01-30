@@ -138,7 +138,11 @@ data {
   // Data needed for HMT (Pass 0 if use_hmt=0)
   real avg_price_hmt;   
   real avg_margin_hmt;
-  real ssnip_hmt;       
+  real ssnip_hmt;   // .05 usually
+
+  // Prior Scales (Passed from R based on data SD)
+  real<lower=0> prior_sigma_share;
+  real<lower=0> prior_sigma_margin;
 }
 
 transformed data {
@@ -271,11 +275,17 @@ model {
       year_raw_supply ~ normal(0, 0.001);
   }
 
+  // --- UPDATED PRIORS (User Request) ---
+  // Alpha: Forced around 1 (log(1)=0). Normal(0, 0.5) gives 95% mass in [0.37, 2.7]
+  mu_log_a ~ normal(0, 0.5);
   
-  mu_log_a ~ normal(0, 1);
   mu_b_event ~ normal(0, 1);
   mu_b_tophold ~ normal(0, 1);
-  logit_mu_s0 ~ normal(-1, 0.5); 
+  
+  // S0: Mean 0.33 (logit -0.7). Mass (0, 0.8) -> logit (-inf, 1.4).
+  // Normal(-0.7, 1.0) places 95% in [0.06, 0.79]
+  logit_mu_s0 ~ normal(-0.7, 1.0); 
+  
   beta_deposits ~ normal(0, 0.5); beta_assets ~ normal(0, 0.5);
 
   // ------------------------------------------------------------
@@ -311,9 +321,10 @@ model {
   
   // Correlation
   Lrescor ~ lkj_corr_cholesky(4.0); 
-  // Outcome variances - RELAXED: was normal(0, 2) and normal(0, 10)
-  sigma_logshare ~ normal(0, 3);
-  sigma_margin ~ normal(0, 15); 
+  
+  // Outcome variances - SCALED by Data (User Request)
+  sigma_logshare ~ normal(0, prior_sigma_share);
+  sigma_margin ~ normal(0, prior_sigma_margin); 
 
 
     

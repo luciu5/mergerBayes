@@ -244,7 +244,11 @@ stan_data <- list(
   use_hmt = as.integer(use_hmt_arg),
   avg_price_hmt = avg_price_hmt,
   avg_margin_hmt = avg_margin_hmt,
-  ssnip_hmt = ssnip_hmt
+  ssnip_hmt = ssnip_hmt,
+  
+  # --- PRIOR SCALES (Data Driven) ---
+  prior_sigma_share = sd(log(simdata$shareIn), na.rm = TRUE),
+  prior_sigma_margin = sd(1 / simdata$margin, na.rm = TRUE)
 )
 
 # Export for Debugging

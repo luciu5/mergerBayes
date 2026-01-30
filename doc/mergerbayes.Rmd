@@ -152,6 +152,55 @@ Aside from its legal significance, banking offers a unique empirical laboratory 
 
 This combination of data richness and theoretical ambiguity makes banking the ideal setting to demonstrate the power of Bayesian Model Averaging.
 
+# Case Study: United States v. Philadelphia National Bank (1963)
+
+To demonstrate the practical utility of our Bayesian framework, we apply it to the data from the landmark *United States v. Philadelphia National Bank* (1963) case. This case established the "structural presumption" in antitrust law, yet the nature of competition in this market remains a subject of theoretical interest.
+
+## Data Overview
+
+We utilize the bank-level data from the period immediately preceding the merger (1960). The sample consists of 39 banks competing in the local Philadelphia market. Unlike stylized examples, the observed data reveals significant heterogeneity in market shares, deposit rates, and operating margins.
+
+```{r pnb_data, echo=FALSE, message=FALSE, warning=FALSE}
+library(readr)
+library(knitr)
+library(kableExtra)
+library(dplyr)
+
+# Load Data Summary
+pnb_summary <- read_csv("../results/pnb_data_summary.csv", show_col_types = FALSE)
+
+kable(pnb_summary, digits = 3, caption = "Summary Statistics: PNB Case Data (1960)") %>%
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+## Model Comparison Results
+
+We run our Bayesian Model Comparison on this single-market dataset, using Bridge Sampling to compute the marginal likelihoods. The results provide decisive evidence in favor of the **Cournot** model.
+
+```{r pnb_results, echo=FALSE, message=FALSE, warning=FALSE}
+# Load Model Results
+pnb_res <- read_csv("../results/pnb_model_results.csv", show_col_types = FALSE) %>%
+  select(Model, LogML, posterior_prob, bayes_factor_vs_best) %>%
+  rename("Posterior Prob" = posterior_prob, "Bayes Factor" = bayes_factor_vs_best)
+
+kable(pnb_res, digits = 2, caption = "Bayesian Model Comparison: PNB Case") %>%
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+The Bayes Factor favoring Cournot over the next best alternative is substantial, suggesting that pre-merger competitive conduct in Philadelphia was best described by quantity-setting behavior (competition for a share of loanable funds) rather than pure price competition.
+
+## Parameter Stability
+
+A key advantage of our framework is that it estimates structural parameters simultaneously with model selection. As shown below, the estimates for demand elasticity ($\alpha$) and the outside share ($s_0$) remain stable across supply models, indicating robust identification of the demand system despite the uncertainty in conduct.
+
+```{r pnb_params, echo=FALSE, message=FALSE, warning=FALSE}
+# Load Parameter Comparison
+pnb_params <- read_csv("../results/pnb_parameter_comparison.csv", show_col_types = FALSE)
+
+kable(pnb_params, caption = "Parameter Estimates (Mean and SD) vs Priors") %>%
+  kable_styling(latex_options = c("striped", "hold_position"), font_size = 10)
+```
+
 # Conclusion
 We have presented a Bayesian framework for merger review that explicitly accounts for model uncertainty. By shifting the focus from selecting a single "best" model to averaging across a set of plausible candidate theories, we offer a more robust path for antitrust enforcement.
 
