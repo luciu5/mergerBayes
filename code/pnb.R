@@ -162,8 +162,9 @@ for (m in 1:4) {
   p_alpha_mean <- mean(post$a_event)
   p_alpha_sd   <- sd(post$a_event)
   
-  p_s0_mean <- mean(post$s0)
-  p_s0_sd   <- sd(post$s0)
+  # Convert S0 from Logit to Probability Scale
+  p_s0_mean <- mean(plogis(post$s0))
+  p_s0_sd   <- sd(plogis(post$s0))
   
   p_rho_mean <- mean(post$rho_gen)
   p_rho_sd   <- sd(post$rho_gen)
