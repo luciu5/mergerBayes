@@ -258,6 +258,20 @@ model {
   mu_year_demand ~ std_normal();
   mu_year_supply ~ std_normal();
   
+  // ------------------------------------------------------------
+  // SINGLE YEAR MODE HANDLING
+  // If N_year == 1, the "year effect" is collinear with the intercept.
+  // We must shut down the year variation to let the intercept handle it.
+  // ------------------------------------------------------------
+  if (N_year == 1) {
+      sigma_year_demand ~ normal(0, 0.001); 
+      year_raw_demand ~ normal(0, 0.001);
+      
+      sigma_year_supply ~ normal(0, 0.001); 
+      year_raw_supply ~ normal(0, 0.001);
+  }
+
+  
   mu_log_a ~ normal(0, 1);
   mu_b_event ~ normal(0, 1);
   mu_b_tophold ~ normal(0, 1);
