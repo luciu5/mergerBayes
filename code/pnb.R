@@ -44,8 +44,6 @@ simdata <- simdata %>%
   filter(is.finite(marginInv) & margin > 0)
 
 cat("After filtering:", nrow(simdata), "observations\n")
-cat("Margin range:", range(simdata$margin), "\n")
-cat("Rate range:", range(simdata$rate_deposits), "\n")
 
 # --- GENERATE DATA SUMMARY TABLE ---
 cat("\n=== GENERATING DATA SUMMARY TABLE ===\n")
@@ -60,17 +58,15 @@ data_summary <- simdata %>%
 
 print(data_summary)
 write_csv(data_summary, file.path(resultsdir, "pnb_data_summary.csv"))
-cat("Data summary saved.\n")
-
-# Aggregates for Covariates
-total_market_deposits <- sum(simdata$total_deposits, na.rm = TRUE)
-bank_assets <- simdata$total_assets
 
 # Calculate Data Driven Priors
 sd_logshare <- sd(log(simdata$shareIn))
 sd_marginInv <- sd(simdata$marginInv)
 
-# Stan Data Preparation
+# Aggregates for Covariates
+bank_assets <- simdata$total_assets
+
+# Stan Data Preparation (Template)
 sdata_template <- list(
   use_cutoff = 0L,
   N = nrow(simdata),
@@ -86,7 +82,7 @@ sdata_template <- list(
   tophold = as.integer(simdata$tophold),
   
   # Covariates
-  log_deposits = as.array(0.0),  # Single market, no between-market variation
+  log_deposits = as.array(0.0),  
   log_assets = as.numeric(scale(log(bank_assets))),
   
   rateDiff_sd = sd(simdata$rate_deposits),
@@ -101,7 +97,7 @@ sdata_template <- list(
   
   # --- SINGLE MARKET MODE ---
   is_single_market = 1L,
-  use_hmt = 0L,
+  use_hmt = 0L, # Default off
   avg_price_hmt = mean(simdata$rate_deposits),
   avg_margin_hmt = mean(simdata$margin),
   ssnip_hmt = 0.05,
@@ -115,148 +111,90 @@ sdata_template <- list(
 cat("Compiling Stan Model...\n")
 stan_mod <- stan_model(modelpath)
 
-# --- RUN MODELS ---
 models <- c("Bertrand", "Auction", "Cournot", "MonCom")
-results <- list()
 
-for (m in 1:4) {
-  model_name <- models[m]
-  cat(sprintf("\n=== RUNNING MODEL: %s ===\n", model_name))
+# --- BATCH EXECUTION FUNCTION ---
+run_batch <- function(sdata, suffix) {
+  cat(sprintf("\n\n>>> STARTING BATCH: %s <<<\n", ifelse(suffix=="", "Standard", "HMT Constrained")))
+  results <- list()
   
-  sdata <- sdata_template
-  sdata$supply_model <- as.integer(m)
-  
-  # Lower adapt_delta for speed (data has variance now)
-  adapt_delta <- 0.90
-  if (m == 3) adapt_delta <- 0.95  # Cournot needs slightly more
-  
-  # Sampling
-  fit <- sampling(
-    stan_mod,
-    data = sdata,
-    chains = CHAINS,
-    cores = CORES,
-    iter = ITER + WARMUP,
-    warmup = WARMUP,
-    seed = SEED,
-    control = list(adapt_delta = adapt_delta, max_treedepth = 12)
-  )
-  
-  # Check Divergences
-  sampler_params <- get_sampler_params(fit, inc_warmup = FALSE)
-  divs <- sum(sapply(sampler_params, function(x) sum(x[, "divergent__"])))
-  cat(sprintf("Divergences: %d\n", divs))
-  
-  # Bridge Sampling (Marginal Likelihood)
-  cat("Computing Bridge Sampling LogML...\n")
-  logml_res <- tryCatch({
-    bridge_sampler(fit, silent = TRUE, maxiter = 5000)
-  }, error = function(e) {
-    cat("Bridge Error:", e$message, "\n")
-    return(NULL)
-  })
-  
-  logml <- if (!is.null(logml_res)) logml_res$logml else NA
-  cat(sprintf("LogML: %.2f\n", logml))
-  
-  # Extract Parameters
-  post <- rstan::extract(fit)
-  
-  # Calculate Posterior Means and SDs
-  p_alpha_mean <- mean(post$a_event)
-  p_alpha_sd   <- sd(post$a_event)
-  
-  # Convert S0 from Logit to Probability Scale
-  p_s0_mean <- mean(plogis(post$s0))
-  p_s0_sd   <- sd(plogis(post$s0))
-  
-  p_rho_mean <- mean(post$rho_gen)
-  p_rho_sd   <- sd(post$rho_gen)
-  
-  p_sigmam_mean <- mean(post$sigma_margin)
-  p_sigmam_sd   <- sd(post$sigma_margin)
-  
-  p_sigmas_mean <- mean(post$sigma_logshare)
-  p_sigmas_sd   <- sd(post$sigma_logshare)
-  
-  # Store for Summary Table
-  results[[model_name]] <- list(
-    Model = model_name,
-    Divergences = divs,
-    LogML = logml,
-    Alpha = p_alpha_mean,
-    S0 = p_s0_mean,
-    Rho = p_rho_mean,
-    SigmaMargin = p_sigmam_mean,
+  for (m in 1:4) {
+    model_name <- models[m]
+    cat(sprintf("\n=== RUNNING MODEL: %s (Suffix: %s) ===\n", model_name, suffix))
     
-    # Store full details for parameter table
-    details = data.frame(
-      Parameter = c("Alpha", "S0", "Sigma_Share", "Sigma_Margin", "Rho"),
-      Mean = c(p_alpha_mean, p_s0_mean, p_sigmas_mean, p_sigmam_mean, p_rho_mean),
-      SD = c(p_alpha_sd, p_s0_sd, p_sigmas_sd, p_sigmam_sd, p_rho_sd)
+    sdata$supply_model <- as.integer(m)
+    
+    adapt_delta <- 0.90
+    if (m == 3) adapt_delta <- 0.95
+    
+    fit <- sampling(
+      stan_mod, data = sdata, chains = CHAINS, cores = CORES,
+      iter = ITER + WARMUP, warmup = WARMUP, seed = SEED,
+      control = list(adapt_delta = adapt_delta, max_treedepth = 12)
     )
-  )
-}
-
-# --- MODEL COMPARISON TABLE ---
-cat("\n=== GENERATING COMPARISON TABLE ===\n")
-# Extract main results (excluding details)
-df_res <- bind_rows(lapply(results, function(x) x[names(x) != "details"]))
-
-max_logml <- max(df_res$LogML, na.rm = TRUE)
-df_res <- df_res %>%
-  mutate(
-    diff_logml = LogML - max_logml,
-    bayes_factor_vs_best = exp(diff_logml),
-    posterior_prob = exp(diff_logml) / sum(exp(diff_logml), na.rm = TRUE)
-  ) %>%
-  arrange(desc(LogML)) %>%
-  select(Model, LogML, posterior_prob, bayes_factor_vs_best, Divergences, Alpha, S0, Rho, SigmaMargin)
-
-print(as.data.frame(df_res))
-
-# Save Results
-outfile <- file.path(resultsdir, "pnb_model_results.csv")
-write_csv(df_res, outfile)
-cat(sprintf("\nResults saved to: %s\n", outfile))
-
-# --- GENERATE PARAMETER COMPARISON TABLE ---
-cat("\n=== GENERATING PARAMETER COMPARISON TABLE ===\n")
-
-# Prior Definitions (Approximate based on Stan code)
-# Alpha ~ LogNormal(0, 1) -> Mean ≈ 1.6, SD ≈ 2.1 (Very rough approx for transformed param)
-# S0 ~ Logistic(-1, 0.5) -> Mean ≈ 0.27
-# Sigma ~ HalfNormal -> Mean depends on truncation
-# Evaluate Priors
-priors <- data.frame(
-  Parameter = c("Alpha", "S0", "Sigma_Share", "Sigma_Margin", "Rho"),
-  Prior_Desc = c(
-    "LogNorm(0,0.5)", 
-    "Logit(-0.7,1)", 
-    sprintf("Normal(0, %.2f)", sd_logshare), 
-    sprintf("Normal(0, %.2f)", sd_marginInv), 
-    "LKJ(4)"
-  ),
-  Prior_Mean = c("1.13", "0.33", "0.00", "0.00", "0.00"),
-  Prior_SD   = c("0.60", "0.20", sprintf("%.2f", sd_logshare), sprintf("%.2f", sd_marginInv), "0.25") 
-)
-
-# Format Prior Column
-priors$Prior_Col <- paste0(priors$Prior_Mean, " (", priors$Prior_SD, ")")
-
-# Combine Models
-param_table <- priors %>% select(Parameter, Prior = Prior_Col)
-
-for (m in models) {
-  det <- results[[m]]$details
-  det$Formatted <- sprintf("%.3f (%.3f)", det$Mean, det$SD)
-  colnames(det)[colnames(det) == "Formatted"] <- m
+    
+    # Diagnostics
+    sampler_params <- get_sampler_params(fit, inc_warmup = FALSE)
+    divs <- sum(sapply(sampler_params, function(x) sum(x[, "divergent__"])))
+    cat(sprintf("Divergences: %d\n", divs))
+    
+    # Bridge Sampling
+    logml_res <- tryCatch({ bridge_sampler(fit, silent = TRUE, maxiter = 5000) }, error = function(e){NULL})
+    logml <- if (!is.null(logml_res)) logml_res$logml else NA
+    cat(sprintf("LogML: %.2f\n", logml))
+    
+    # Extract
+    post <- rstan::extract(fit)
+    p_alpha_mean <- mean(post$a_event); p_alpha_sd <- sd(post$a_event)
+    p_s0_mean <- mean(plogis(post$s0)); p_s0_sd <- sd(plogis(post$s0)) # Probability Scale
+    p_rho_mean <- mean(post$rho_gen); p_rho_sd <- sd(post$rho_gen)
+    p_sigmam_mean <- mean(post$sigma_margin); p_sigmam_sd <- sd(post$sigma_margin)
+    p_sigmas_mean <- mean(post$sigma_logshare); p_sigmas_sd <- sd(post$sigma_logshare)
+    
+    results[[model_name]] <- list(
+      Model = model_name, Divergences = divs, LogML = logml,
+      Alpha = p_alpha_mean, S0 = p_s0_mean, Rho = p_rho_mean, SigmaMargin = p_sigmam_mean,
+      details = data.frame(
+        Parameter = c("Alpha", "S0", "Sigma_Share", "Sigma_Margin", "Rho"),
+        Mean = c(p_alpha_mean, p_s0_mean, p_sigmas_mean, p_sigmam_mean, p_rho_mean),
+        SD = c(p_alpha_sd, p_s0_sd, p_sigmas_sd, p_sigmam_sd, p_rho_sd)
+      )
+    )
+  }
   
-  param_table <- left_join(param_table, det %>% select(Parameter, all_of(m)), by = "Parameter")
+  # --- SUMMARY TABLES ---
+  df_res <- bind_rows(lapply(results, function(x) x[names(x) != "details"]))
+  max_logml <- max(df_res$LogML, na.rm = TRUE)
+  df_res <- df_res %>% mutate(diff_logml = LogML - max_logml, posterior_prob = exp(diff_logml) / sum(exp(diff_logml), na.rm=TRUE)) %>% arrange(desc(LogML))
+  
+  outfile_res <- file.path(resultsdir, paste0("pnb_model_results", suffix, ".csv"))
+  write_csv(df_res, outfile_res)
+  
+  # Parameter Table
+  priors <- data.frame(
+    Parameter = c("Alpha", "S0", "Sigma_Share", "Sigma_Margin", "Rho"),
+    Prior_Desc = c("LogNorm(0,0.5)", "Logit(-0.7,1)", sprintf("Normal(0, %.2f)", sd_logshare), sprintf("Normal(0, %.2f)", sd_marginInv), "LKJ(4)"),
+    Prior_Mean = c("1.13", "0.33", "0.00", "0.00", "0.00"),
+    Prior_SD   = c("0.60", "0.20", sprintf("%.2f", sd_logshare), sprintf("%.2f", sd_marginInv), "0.25")
+  )
+  priors$Prior_Col <- paste0(priors$Prior_Mean, " (", priors$Prior_SD, ")")
+  param_table <- priors %>% select(Parameter, Prior = Prior_Col)
+  
+  for (m in models) {
+    det <- results[[m]]$details
+    param_table <- left_join(param_table, det %>% mutate(Formatted = sprintf("%.3f (%.3f)", Mean, SD)) %>% select(Parameter, !!m := Formatted), by="Parameter")
+  }
+  
+  outfile_param <- file.path(resultsdir, paste0("pnb_parameter_comparison", suffix, ".csv"))
+  write_csv(param_table, outfile_param)
 }
 
-# Print and Save
-print(param_table)
-param_outfile <- file.path(resultsdir, "pnb_parameter_comparison.csv")
-write_csv(param_table, param_outfile)
-cat(sprintf("\nParameter table saved to: %s\n", param_outfile))
+# --- EXECUTE BATCHES ---
+
+# 1. Standard Run
+run_batch(sdata_template, "")
+
+# 2. HMT Constrained Run
+sdata_hmt <- sdata_template
+sdata_hmt$use_hmt <- 1L
+run_batch(sdata_hmt, "_hmt")
