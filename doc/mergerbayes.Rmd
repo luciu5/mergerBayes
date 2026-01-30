@@ -30,9 +30,28 @@ We consider four canonical models of competition. We assume a standard Logit dem
 $$
 s_j(\mathbf{p}) = \frac{\exp(\delta_j)}{\sum_{k=0}^J \exp(\delta_k)}
 $$
-where $\delta_j = \beta x_j - \alpha p_j + \xi_j$ is the mean utility (net of price) and $\alpha$ is the price sensitivity parameter. The outside good share is denoted as $s_0$.
+where $\delta_j = \beta x_j - \alpha p_j + \xi_j$ is the mean utility (net of price) and $\alpha$ is the price sensitivity parameter. The outside good share is denoted as $s_0$. 
+
+## Why Share-Consistent Demand?
+
+We deliberately adopt a demand system consistent with share-based concentration metrics for three reasons rooted in the institutional reality of antitrust enforcement.
+
+First, **legal doctrine operates on market shares**. From the *Philadelphia National Bank* structural presumption to the modern *Merger Guidelines*, agencies primarily screen and challenge mergers based on share-based concentration measures (e.g., HHI). A demand model that does not map market structure effectively to price effects would be theoretically flexible but institutionally irrelevant. Among demand systems consistent with this share-centric paradigm, Logit and CES are the primary tractable options.
+
+Second, **data constraints preclude flexibility**. While Random Coefficients Logit allows for richer substitution patterns, it requires micro-data that is rarely available in the initial stages of merger review. In the absence of such data, flexible models collapse back to calibration on shares, effectively mimicking the Logit outcome but with less transparency.
+
+Third, our Bayesian approach **endogenizes market definition**. A common critique of Logit is its sensitivity to the definition of the outside good. Unlike standard calibration—which fixes $s_0$ ad-hoc—we treat the outside share $s_0$ as an unknown parameter to be estimated. This allows the model to probabilistically "size the market" based on the observed tension between prices and shares, absorbing the uncertainty of market definition directly into the posterior.
 
 In our Bayesian framework, we estimate a structural parameter $\tilde{\alpha}$ that scales the margin relationships derived below.
+
+## Bertrand Competition
+...
+
+# Bayesian Methodology
+
+## Model Estimation
+
+We estimate each model $m \in \{ \text{Cournot, Bertrand, Auction, MonComp} \}$ using a Bayesian hierarchical framework implemented in Stan. For each model, we specify the joint likelihood of observed market shares and margins. The structural parameters—including the price sensitivity $\alpha$, marginal costs $c$, and the **outside share $s_0$**—are estimated simultaneously. Unlike standard calibration approaches that often "plug in" an arbitrary value for the outside good (e.g., 50%), we treat $s_0$ as an unknown parameter to be inferred from the data (conditioned on priors), further capturing the uncertainty inherent in market definition.
 
 ## Bertrand Competition
 
