@@ -175,7 +175,7 @@ kable(pnb_summary, digits = 3, caption = "Summary Statistics: PNB Case Data (196
 
 ## Model Comparison Results
 
-We run our Bayesian Model Comparison on this single-market dataset, using Bridge Sampling to compute the marginal likelihoods. The results provide decisive evidence in favor of the **Cournot** model.
+We run our Bayesian Model Comparison on this single-market dataset, using Bridge Sampling to compute the marginal likelihoods. The results provide decisive evidence in favor of the **Monopolistic Competition** model.
 
 ```{r pnb_results, echo=FALSE, message=FALSE, warning=FALSE}
 # Load Model Results
@@ -187,7 +187,7 @@ kable(pnb_res, digits = 2, caption = "Bayesian Model Comparison: PNB Case") %>%
   kable_styling(latex_options = c("striped", "hold_position"))
 ```
 
-The Bayes Factor favoring Cournot over the next best alternative is substantial, suggesting that pre-merger competitive conduct in Philadelphia was best described by quantity-setting behavior (competition for a share of loanable funds) rather than pure price competition.
+The Bayes Factor favoring Monopolistic Competition is substantial. This suggests that despite the "structural presumption" linking shares to market power, banks in the pre-merger Philadelphia market effectively acted as local monopolists—setting margins based on customer inelasticity rather than engaging in strategic interaction with local rivals.
 
 ## Parameter Stability
 
