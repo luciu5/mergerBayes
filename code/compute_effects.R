@@ -2,7 +2,6 @@
 library(dplyr)
 library(tidyr)
 library(antitrust)
-library(rstan)
 library(jsonlite)
 library(parallel)
 
@@ -52,20 +51,35 @@ models <- c("bertrand", "cournot", "2nd")
 # Main processing loop
 for (m_name in models) {
     cat("\nProcessing model:", m_name, "\n")
-    outfile <- file.path(datadir, paste0("stan_hhiperform_", m_name, ".RData"))
+
+    # Try new location first (results/), fallback to old (data/)
+    outfile <- file.path(resdir, paste0("stan_hhiperform_", m_name, ".RData"))
+    if (!file.exists(outfile)) {
+        outfile <- file.path(datadir, paste0("stan_hhiperform_", m_name, ".RData"))
+    }
 
     if (!file.exists(outfile)) {
         cat("  Skip: Result file not found.\n")
         next
     }
 
-    # Load Stan fit
+    # Load Stan results
     cat("  Loading Stan results...\n")
-    load(outfile) # loads 'fit'
+    load(outfile)
 
-    # Extract parameters
-    draws <- rstan::extract(fit)
-    n_draws <- length(draws$lp__)
+    # Handle both new compact format (posteriors) and legacy format (fit)
+    if (exists("posteriors")) {
+        cat("  Using compact format (posteriors list)\n")
+        draws <- posteriors
+        n_draws <- nrow(draws$a_event)
+    } else if (exists("fit")) {
+        cat("  Using legacy format (fit object)\n")
+        draws <- rstan::extract(fit)
+        n_draws <- length(draws$lp__)
+    } else {
+        cat("  ERROR: Neither 'posteriors' nor 'fit' found in file!\n")
+        next
+    }
     cat("  N draws found:", n_draws, "\n")
 
     # Market levels from simdata (must match Stan order)
@@ -196,8 +210,8 @@ for (m_name in models) {
     saveRDS(model_results, file = file.path(resdir, paste0("effects_distribution_", m_name, ".rds")))
     cat("  Saved results to results/effects_distribution_", m_name, ".rds\n")
 
-    # Cleanup memory
-    rm(fit, draws, model_results, all_results)
+    # Cleanup memory - handle both formats
+    rm(list = intersect(c("fit", "posteriors", "loo_result", "bridge", "fit_sum", "plot_sum", "stan_data", "draws", "model_results", "all_results"), ls()))
     gc()
 }
 
