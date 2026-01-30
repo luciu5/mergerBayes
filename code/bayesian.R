@@ -190,7 +190,26 @@ plot_sum <- try(plot(fit, pars = plot_pars))
 fit_sum <- try(summary(fit, pars = sum_pars)$summary)
 
 # Bridge sampling for model comparison
-bridge <- try(bridge_sampler(fit, cores = thread_count))
+# Note: Bridge sampling often fails due to stanfit serialization issues
+# We use LOO for model comparison instead
+cat("\nAttempting bridge sampling (may fail due to technical limitations)...\n")
+bridge <- try({
+  # Re-assign model to fit object (sometimes helps)
+  fit@stanmodel <- model
+  bridge_sampler(fit, silent = FALSE, cores = thread_count, maxiter = 1000)
+}, silent = FALSE)
+
+if (inherits(bridge, "try-error")) {
+  cat("Bridge sampling failed (expected). Using LOO for model comparison.\n")
+  cat("Error:", as.character(bridge), "\n")
+  bridge <- list(logml = NA, niter = 0, method = "failed", 
+                 error = as.character(bridge),
+                 note = "Use LOO for model comparison")
+} else if (is.na(bridge$logml)) {
+  cat("Bridge sampling returned NA. Using LOO for model comparison.\n")
+} else {
+  cat("Bridge sampling succeeded! logml =", bridge$logml, "\n")
+}
 
 # LOO cross-validation (compute now, save result instead of raw log_lik draws)
 cat("Computing LOO cross-validation...\n")
