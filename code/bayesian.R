@@ -211,6 +211,7 @@ posteriors <- list(
   a_event = rstan::extract(fit, "a_event")[[1]], # Price sensitivity by market
   s0 = rstan::extract(fit, "s0")[[1]], # Outside share by market
   b_event = rstan::extract(fit, "b_event")[[1]], # Market fixed effects
+  b_tophold_scaled = rstan::extract(fit, "b_tophold_scaled")[[1]], # Bank fixed effects (needed for compute_effects.R)
   sigma_logshare = rstan::extract(fit, "sigma_logshare")[[1]],
   sigma_margin = rstan::extract(fit, "sigma_margin")[[1]],
   rho = rstan::extract(fit, "rho_gen")[[1]],
