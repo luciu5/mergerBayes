@@ -66,6 +66,10 @@ cat("Data summary saved.\n")
 total_market_deposits <- sum(simdata$total_deposits, na.rm = TRUE)
 bank_assets <- simdata$total_assets
 
+# Calculate Data Driven Priors
+sd_logshare <- sd(log(simdata$shareIn))
+sd_marginInv <- sd(simdata$marginInv)
+
 # Stan Data Preparation
 sdata_template <- list(
   use_cutoff = 0L,
@@ -103,8 +107,8 @@ sdata_template <- list(
   ssnip_hmt = 0.05,
   
   # --- PRIOR SCALES (Data Driven) ---
-  prior_sigma_share = sd(log(simdata$shareIn)), 
-  prior_sigma_margin = sd(simdata$marginInv)
+  prior_sigma_share = sd_logshare, 
+  prior_sigma_margin = sd_marginInv
 )
 
 # Compile Model
@@ -223,11 +227,18 @@ cat("\n=== GENERATING PARAMETER COMPARISON TABLE ===\n")
 # Alpha ~ LogNormal(0, 1) -> Mean ≈ 1.6, SD ≈ 2.1 (Very rough approx for transformed param)
 # S0 ~ Logistic(-1, 0.5) -> Mean ≈ 0.27
 # Sigma ~ HalfNormal -> Mean depends on truncation
+# Evaluate Priors
 priors <- data.frame(
   Parameter = c("Alpha", "S0", "Sigma_Share", "Sigma_Margin", "Rho"),
-  Prior_Desc = c("LogNorm(0,0.5)", "Logit(-0.7,1)", "Data Scaled", "Data Scaled", "LKJ(4)"),
-  Prior_Mean = c("1.13", "0.33", "Data SD", "Data SD", "0.00"),
-  Prior_SD   = c("0.60", "0.20", "Data SD", "Data SD", "0.25") 
+  Prior_Desc = c(
+    "LogNorm(0,0.5)", 
+    "Logit(-0.7,1)", 
+    sprintf("Normal(0, %.2f)", sd_logshare), 
+    sprintf("Normal(0, %.2f)", sd_marginInv), 
+    "LKJ(4)"
+  ),
+  Prior_Mean = c("1.13", "0.33", "0.00", "0.00", "0.00"),
+  Prior_SD   = c("0.60", "0.20", sprintf("%.2f", sd_logshare), sprintf("%.2f", sd_marginInv), "0.25") 
 )
 
 # Format Prior Column
