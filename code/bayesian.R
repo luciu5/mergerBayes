@@ -42,9 +42,19 @@ if (is.na(use_hmt_arg)) use_hmt_arg <- 0
 data_frac <- as.numeric(args[6])
 if (is.na(data_frac)) data_frac <- 1.0
 
-# Year Filter (2014, 2015, or 0 for both)
-filter_year_arg <- as.numeric(args[7])
-if (is.na(filter_year_arg)) filter_year_arg <- 0
+# Year Filter (Single "2014" or Range "2014-2016")
+filter_year_str <- as.character(args[7])
+if (is.na(filter_year_str) || filter_year_str == "NA") filter_year_str <- "0"
+
+if (grepl("-", filter_year_str)) {
+  parts <- as.numeric(unlist(strsplit(filter_year_str, "-")))
+  start_year <- parts[1]
+  end_year <- parts[2]
+} else {
+  start_year <- as.numeric(filter_year_str)
+  end_year <- start_year
+}
+
 
 
 # Set up Stan parallelization
@@ -128,10 +138,16 @@ simdata <- simdata %>%
 # ------------------------------------------------------------------------------
 
 # 1. Year Filter
-if (filter_year_arg > 0) {
-  log_msg(paste("Filtering for Year:", filter_year_arg))
-  simdata <- simdata %>% filter(year == filter_year_arg)
+if (start_year > 0) {
+  if (start_year == end_year) {
+      log_msg(paste("Filtering for Year:", start_year))
+      simdata <- simdata %>% filter(year == start_year)
+  } else {
+      log_msg(paste("Filtering for Year Range:", start_year, "-", end_year))
+      simdata <- simdata %>% filter(year >= start_year & year <= end_year)
+  }
 }
+
 
 # 2. Random Subsample (Market-Level)
 if (data_frac < 1.0 && data_frac > 0) {
@@ -146,7 +162,7 @@ if (data_frac < 1.0 && data_frac > 0) {
   log_msg(paste("Reduced to", n_keep, "markets."))
 }
 
-if (filter_year_arg > 0 || data_frac < 1.0) {
+if (start_year > 0 || data_frac < 1.0) {
     # Re-level again after subsampling
     simdata <- simdata %>%
       mutate(
