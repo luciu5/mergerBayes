@@ -1,3 +1,15 @@
+---
+title: "A Bayesian Approach to Merger Review"
+author: "Matt Panhans & Charles Taragin"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document:
+    number_sections: true
+  html_document:
+    df_print: paged
+bibliography: references.bib
+---
+
 # Introduction
 
 Merger review inherently takes place in a data-constrained environment. Antitrust agencies and practitioners are frequently tasked with simulating the effects of a proposed combination using only a single cross-section of market shares, prices, and potentially a few margin observations. In this setting, standard econometric techniques that rely on asymptotics are fundamentally inapplicable. There is simply not enough data to support traditional estimation.
@@ -9,6 +21,8 @@ To overcome this, practitioners typically resort to **calibration methods**. Thi
 The fragility of this approach is exposed when the "true" model of competition is unknown. As demonstrated in @TaraginPanhans2023, conditioning on different standard models yields contradictory predictions about merger effects. By committing to a single model, the analyst implicitly assumes away all structural uncertainty, leading to overconfident policy prescriptions.
 
 In this paper, we propose replacing this rigid approach with the **full Bayesian machinery**. Unlike frequentist tests that require asymptotics to reject a model, the Bayesian framework is designed "from the ground up" to quantify uncertainty through probability. By explicitly modeling the joint distribution of observed data and parameters, we address the "model selection problem" directly through **Bayesian Model Averaging (BMA)**. Instead of forcing a binary choice between statistically indistinguishable theories, we estimate the posterior probability of each model given the finite data available.
+
+Our contribution is not the development of new Bayesian statistical theory, but rather the application of these standard tools to resolve a persistent identification failure in antitrust policy. While BMA is well-established in macroeconomics and finance, its utility for merger simulation has been overlooked. We show that BMA provides the missing link between the theoretical ambiguity of firm conduct and the practical necessity of reaching a decision in data-constrained reviews. By operationalizing this "conduct-agnostic" framework, we offer a rigorous alternative to the ad-hoc assumptions that currently dominate imperfectly competitive market analysis.
 
 # Structural Models of Competition
 
@@ -123,10 +137,10 @@ This combination of data richness and theoretical ambiguity makes banking the id
 We have presented a Bayesian framework for merger review that explicitly accounts for model uncertainty. By shifting the focus from selecting a single "best" model to averaging across a set of plausible candidate theories, we offer a more robust path for antitrust enforcement.
 
 ## Policy Implications
-Our results suggest that the current practice of relying on a single structural model (often Bertrand) may lead to overconfident and potentially biased predictions of merger effects. In the banking sector application, we find that BMA often yields more conservative harm estimates than the pure Bertrand baseline but identifies risk in areas where alternative models (like Cournot) might otherwise be overlooked. This "zone of divergence," where models disagree significantly, is precisely where BMA provides the most value to policymakers. It offers a mathematically grounded way to hedge against the risk of misspecification.
+Our results suggest that the current practice of relying on a single structural model (often Bertrand) may lead to overconfident and potentially biased predictions of merger effects. In the banking sector application, we find that BMA often yields more conservative harm estimates than the pure Bertrand baseline but validates risk in areas where alternative models (like Cournot) might otherwise be overlooked. This approach provides a rigorous, data-driven path to resolving model ambiguity in individual merger cases, moving beyond the "all-or-nothing" nature of current enforcement debates.
 
 ## Future Directions
-Future research should extend this framework to include more flexible demand specifications (e.g., Random Coefficients Logit) and dynamic models of competition. Additionally, the application of BMA to other industries with ambiguous competitive conduct—such as hospital mergers or digital platform markets—would further validate the utility of this approach.
+While this paper focuses on case-specific adjudication, a natural extension is to apply this BMA framework to the design of **Merger Screening Thresholds**. Future work could use the galaxy of BMA-weighted predictions to derive "conduct-robust" concentration screens (e.g., HHI levels) that minimize decision error across a portfolio of uncertain conduct types. Additionally, extending the framework to include more flexible demand specifications (e.g., Random Coefficients Logit) would further validate its utility.
 
 # References
 
