@@ -192,29 +192,60 @@ fit_sum <- try(summary(fit, pars = sum_pars)$summary)
 # Bridge sampling for model comparison
 bridge <- try(bridge_sampler(fit, cores = thread_count))
 
+# LOO cross-validation (compute now, save result instead of raw log_lik draws)
+cat("Computing LOO cross-validation...\n")
+loo_result <- try(loo::loo(fit, cores = thread_count))
+if (!inherits(loo_result, "try-error")) {
+  cat("LOO elpd:", loo_result$estimates["elpd_loo", "Estimate"], "\n")
+}
+
 # Extract predicted margins for diagnostic
-# Extract predicted margins for diagnostic (now using the scalar count)
 neg_count_samples <- rstan::extract(fit, "neg_margin_count")[[1]]
 neg_count_mean <- mean(neg_count_samples)
 cat("Average number of negative predicted margins per draw:", neg_count_mean, "\n")
 
-# Save results with error handling for SLURM disk issues
+# Extract only essential posterior draws to reduce file size
+# This replaces saving the full fit object (3GB -> ~50-100MB)
+cat("Extracting essential posteriors...\n")
+posteriors <- list(
+  a_event = rstan::extract(fit, "a_event")[[1]], # Price sensitivity by market
+  s0 = rstan::extract(fit, "s0")[[1]], # Outside share by market
+  b_event = rstan::extract(fit, "b_event")[[1]], # Market fixed effects
+  sigma_logshare = rstan::extract(fit, "sigma_logshare")[[1]],
+  sigma_margin = rstan::extract(fit, "sigma_margin")[[1]],
+  rho = rstan::extract(fit, "rho_gen")[[1]],
+  gamma_loan = rstan::extract(fit, "gamma_loan")[[1]],
+  year_effect_demand = rstan::extract(fit, "year_effect_demand")[[1]],
+  year_effect_supply = rstan::extract(fit, "year_effect_supply")[[1]],
+  neg_margin_count = neg_count_samples
+)
+
+# Add cutoff_share if using cutoff model
+if (stan_data$use_cutoff == 1) {
+  posteriors$cutoff_share <- rstan::extract(fit, "cutoff_share")[[1]]
+}
+
+# Save compact results (LOO + bridge + summaries + key posteriors)
 cat("Attempting to save to:", outfile, "\n")
 tryCatch(
   {
-    save(fit, bridge, plot_sum, fit_sum, file = outfile, compress = "xz")
+    save(loo_result, bridge, plot_sum, fit_sum, posteriors, stan_data,
+      file = outfile, compress = "xz"
+    )
     cat("Results saved successfully to:", outfile, "\n")
+
+    # Report file size
+    file_size_mb <- file.info(outfile)$size / 1024^2
+    cat("File size:", round(file_size_mb, 1), "MB\n")
   },
   error = function(e) {
-    cat("ERROR saving full results:", conditionMessage(e), "\n")
-    # Try saving a minimal version without the full fit object
+    cat("ERROR saving results:", conditionMessage(e), "\n")
+    # Fallback: save even more minimal version
     minimal_outfile <- sub("\\.RData$", "_minimal.RData", outfile)
     cat("Attempting to save minimal results to:", minimal_outfile, "\n")
     tryCatch(
       {
-        # Extract only essential summaries to reduce file size
-        fit_summary <- summary(fit)$summary
-        save(bridge, plot_sum, fit_sum, fit_summary, file = minimal_outfile, compress = "xz")
+        save(loo_result, bridge, fit_sum, file = minimal_outfile, compress = "xz")
         cat("Minimal results saved successfully.\n")
       },
       error = function(e2) {
