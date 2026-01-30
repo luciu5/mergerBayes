@@ -1,0 +1,75 @@
+=== Job 43364710 | Model 4 (moncom) | Started Fri Jan 30 05:32:22 EST 2026 ===
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+
+Attaching package: ‘kableExtra’
+
+The following object is masked from ‘package:dplyr’:
+
+    group_rows
+
+Loading required package: StanHeaders
+
+rstan version 2.32.6 (Stan version 2.32.2)
+
+For execution on a local, multicore CPU with excess RAM we recommend calling
+options(mc.cores = parallel::detectCores()).
+To avoid recompilation of unchanged Stan programs, we recommend calling
+rstan_options(auto_write = TRUE)
+For within-chain threading using `reduce_sum()` or `map_rect()` Stan functions,
+change `threads_per_chain` option:
+rstan_options(threads_per_chain = 1)
+
+
+Attaching package: ‘rstan’
+
+The following object is masked from ‘package:tidyr’:
+
+    extract
+
+This is loo version 2.8.0
+- Online documentation and vignettes at mc-stan.org/loo
+- As of v2.0.0 loo defaults to 1 core but we recommend using as many as possible. Use the 'cores' argument or set options(mc.cores = NUM_CORES) for an entire session. 
+
+Attaching package: ‘loo’
+
+The following object is masked from ‘package:rstan’:
+
+    loo
+
+[2026-01-30 05:32:26]  Running Model: moncom | Chains: 4 | Threads: 8 
+[2026-01-30 05:32:26]  Loading data... 
+[2026-01-30 05:32:26]  Data filtered. Rows: 16009 
+[2026-01-30 05:32:27]  Dropping 3 markets with <= 2 firms (Monopoly/Duopoly risk). 
+[2026-01-30 05:32:27]  Panel Mode Detected. N_markets: 264 
+[2026-01-30 05:32:27]  Data preparation complete. Compiling model... 
+[2026-01-30 05:32:28]  Starting sampling (7000 iter, thin=5) | adapt_delta: 0.95 
+Error : Exception: mismatch in dimension declared and found in context; processing stage=data initialization; variable name=log_deposits; position=0; dims declared=(264); dims found=(261) (in 'anon_model', line 121, column 2 to column 31)
+failed to create the sampler; sampling not done
+[2026-01-30 05:32:28]  Sampling complete. 
+[2026-01-30 05:32:28]  Generating summaries... 
+Stan model 'anon_model' does not contain samples.
+Stan model 'anon_model' does not contain samples.
+Warning message:
+In mean.default(neg_count_samples) :
+  argument is not numeric or logical: returning NA
+[2026-01-30 05:32:28]  Avg negative margins: NA 
+[2026-01-30 05:32:28]  Saving summary file... 
+[2026-01-30 05:32:28]  Running LOO... 
+[2026-01-30 05:32:28]  LOO Failed: Stan model does not contain posterior draws. 
+[2026-01-30 05:32:28]  Attempting Bridge Sampler... 
+Stan model 'anon_model' does not contain samples.
+[2026-01-30 05:32:28]  Bridge Failed: dim(X) must have a positive length 
+[2026-01-30 05:32:28]  Saving final results to: /fsr/home/m1cst00/Projects/mergerBayes/results/stan_hhiperform_moncom.RData 
+[2026-01-30 05:32:30]  Full results saved. 
+[2026-01-30 05:32:30]  Script finished successfully. 
+=== SUCCESS: Model moncom completed at Fri Jan 30 05:32:30 EST 2026 ===
