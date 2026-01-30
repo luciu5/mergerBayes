@@ -3,12 +3,12 @@ functions {
   // OPTIMIZED JOINT LIKELIHOOD FUNCTION
   // Calculates P(y1, y2) = P(y1) * P(y2 | y1) for maximum speed.
   // ---------------------------------------------------------------------------
-  real partial_sum_fast(int[] slice_idx,
+  real partial_sum_fast(array[] int slice_idx,
                         int start, int end,
                         // --- DATA ---
                         vector logshareIn, vector marginInv, 
                         vector shareIn, vector rateDiff, vector loan_rate,
-                        int[] event, int[] tophold, int[] year,
+                        array[] int event, array[] int tophold, array[] int year,
                         // --- PARAMETERS ---
                         vector a_event, vector b_event, vector b_tophold_scaled,
                         vector s0, vector year_effect_demand, vector year_effect_supply,
@@ -136,7 +136,7 @@ transformed data {
   vector[N] logshareIn = log(shareIn);
   
   // Sequence for reduce_sum
-  int seq[N];
+  array[N] int seq;
   for (i in 1:N) seq[i] = i;
 }
 

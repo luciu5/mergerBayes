@@ -40,8 +40,15 @@ if (is.na(use_cutoff)) use_cutoff <- 0
 model_name <- c("bertrand", "2nd", "cournot", "moncom")
 directory <- file.path(Sys.getenv("HOME"), "Projects", "mergerBayes")
 datadir <- file.path(directory, "data")
+resultsdir <- file.path(directory, "results")
 modelpath <- file.path(directory, "code", "bayesian.stan")
-outfile <- file.path(datadir, paste0("stan_hhiperform_", model_name[thismodel], ".RData"))
+outfile <- file.path(resultsdir, paste0("stan_hhiperform_", model_name[thismodel], ".RData"))
+
+# Ensure results directory exists
+if (!dir.exists(resultsdir)) {
+  dir.create(resultsdir, recursive = TRUE)
+  cat("Created results directory:", resultsdir, "\n")
+}
 
 # Load 2010-2020 bank merger data
 load(file = file.path(datadir, "banksimdata.RData"))
@@ -191,5 +198,28 @@ neg_count_samples <- rstan::extract(fit, "neg_margin_count")[[1]]
 neg_count_mean <- mean(neg_count_samples)
 cat("Average number of negative predicted margins per draw:", neg_count_mean, "\n")
 
-# Save results
-save(fit, bridge, plot_sum, fit_sum, file = outfile)
+# Save results with error handling for SLURM disk issues
+cat("Attempting to save to:", outfile, "\n")
+tryCatch(
+  {
+    save(fit, bridge, plot_sum, fit_sum, file = outfile, compress = "xz")
+    cat("Results saved successfully to:", outfile, "\n")
+  },
+  error = function(e) {
+    cat("ERROR saving full results:", conditionMessage(e), "\n")
+    # Try saving a minimal version without the full fit object
+    minimal_outfile <- sub("\\.RData$", "_minimal.RData", outfile)
+    cat("Attempting to save minimal results to:", minimal_outfile, "\n")
+    tryCatch(
+      {
+        # Extract only essential summaries to reduce file size
+        fit_summary <- summary(fit)$summary
+        save(bridge, plot_sum, fit_sum, fit_summary, file = minimal_outfile, compress = "xz")
+        cat("Minimal results saved successfully.\n")
+      },
+      error = function(e2) {
+        cat("FATAL: Could not save even minimal results:", conditionMessage(e2), "\n")
+      }
+    )
+  }
+)
