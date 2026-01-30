@@ -130,6 +130,15 @@ data {
   int<lower=1, upper=4> supply_model; 
   int<lower=0, upper=1> use_cutoff;
   int<lower=1> grainsize;
+  
+  // --- NEW CONTROL FLAGS ---
+  int<lower=0, upper=1> is_single_market;  // 1 = PNB (Simple), 0 = Panel (Complex)
+  int<lower=0, upper=1> use_hmt;           // 1 = Enforce Legal Constraint
+  
+  // Data needed for HMT (Pass 0 if use_hmt=0)
+  real avg_price_hmt;   
+  real avg_margin_hmt;
+  real ssnip_hmt;       
 }
 
 transformed data {
@@ -204,20 +213,83 @@ transformed parameters {
 
 model {
   // --- RELAXED PRIORS (improved for convergence) ---
-  // Year effects - keep these relatively tight
-  mu_year_demand ~ std_normal(); sigma_year_demand ~ normal(0, 0.5); year_raw_demand ~ std_normal();
-  mu_year_supply ~ std_normal(); sigma_year_supply ~ normal(0, 0.5); year_raw_supply ~ std_normal();
   
-  // Alpha (price coefficient) - RELAXED: was normal(-0.5, 0.5)
-  mu_log_a ~ normal(0, 1); sigma_log_a ~ normal(0, 0.5); r_event_a_raw ~ std_normal();
+  // ------------------------------------------------------------
+  // 1. CONDITIONAL PRIORS (Handle "Singularity" of N=1)
+  // ------------------------------------------------------------
+  if (is_single_market == 1) {
+    // PNB MODE: Turn off heterogeneity. 
+    // Force the "raw" deviations and "sigmas" to zero.
+    // The model now effectively estimates only the 'mu' terms (Scalars).
+    
+    sigma_log_a ~ normal(0, 0.001);       // Shrink variance to 0
+    sigma_year_demand ~ normal(0, 0.001); 
+    sigma_year_supply ~ normal(0, 0.001);
+    sigma_b_event ~ normal(0, 0.001);
+    sigma_b_tophold ~ normal(0, 0.001);
+    tau_s0 ~ normal(0, 0.001);
+    
+    // Force the random effects to 0
+    r_event_a_raw ~ normal(0, 0.001);
+    year_raw_demand ~ normal(0, 0.001);
+    year_raw_supply ~ normal(0, 0.001);
+    b_event_raw ~ normal(0, 0.001);
+    b_tophold_raw ~ normal(0, 0.001);
+    s0_raw ~ normal(0, 0.001);
+    
+  } else {
+    // PANEL MODE: Standard Hierarchical Priors
+    // Year effects - keep these relatively tight
+    sigma_year_demand ~ normal(0, 0.5); year_raw_demand ~ std_normal();
+    sigma_year_supply ~ normal(0, 0.5); year_raw_supply ~ std_normal();
+    
+    // Alpha (price coefficient) - RELAXED: was normal(-0.5, 0.5)
+    sigma_log_a ~ normal(0, 0.5); r_event_a_raw ~ std_normal();
+    
+    // Market and bank fixed effects - RELAXED: was normal(0, 0.2)
+    sigma_b_event ~ normal(0, 0.5); b_event_raw ~ std_normal();
+    sigma_b_tophold ~ normal(0, 0.5); b_tophold_raw ~ std_normal();
+    
+    // Outside share - RELAXED tau: was normal(0, 0.2)
+    tau_s0 ~ normal(0, 0.5); s0_raw ~ std_normal();
+  }
   
-  // Market and bank fixed effects - RELAXED: was normal(0, 0.2)
-  mu_b_event ~ normal(0, 1); sigma_b_event ~ normal(0, 0.5); b_event_raw ~ std_normal();
-  mu_b_tophold ~ normal(0, 1); sigma_b_tophold ~ normal(0, 0.5); b_tophold_raw ~ std_normal();
+  // Common priors for the means (apply to both)
+  mu_year_demand ~ std_normal();
+  mu_year_supply ~ std_normal();
   
-  // Outside share - RELAXED tau: was normal(0, 0.2)
-  logit_mu_s0 ~ normal(-1, 0.5); tau_s0 ~ normal(0, 0.5); 
-  beta_deposits ~ normal(0, 0.5); beta_assets ~ normal(0, 0.5); s0_raw ~ std_normal();
+  mu_log_a ~ normal(0, 1);
+  mu_b_event ~ normal(0, 1);
+  mu_b_tophold ~ normal(0, 1);
+  logit_mu_s0 ~ normal(-1, 0.5); 
+  beta_deposits ~ normal(0, 0.5); beta_assets ~ normal(0, 0.5);
+
+  // ------------------------------------------------------------
+  // 2. THE HMT CONSTRAINT (Legal Prior)
+  // ------------------------------------------------------------
+  if (use_hmt == 1) {
+     // Convert parameters to natural scale for the check
+     // alpha = exp(mu_log_a) / rateDiff_sd
+     // s0 = inv_logit(logit_mu_s0)
+     
+     real alpha_check = exp(mu_log_a) / rateDiff_sd; 
+     real s0_check = inv_logit(logit_mu_s0);
+     
+     // HMT Logic: Elasticity < 1 / (SSNIP + Margin)
+     // approx aggregate elasticity = alpha * P * s0
+     
+     real agg_elasticity = abs(alpha_check * avg_price_hmt * s0_check);
+     real max_elasticity = 1.0 / (ssnip_hmt + avg_margin_hmt);
+     
+     // Note: alpha is negative, so elasticity is negative. We use abs() for magnitude comparison
+     // or simply check if magnitude of elasticity is too high.
+     // Standard elasticity formula is negative. HMT usually refers to critical loss magnitude.
+     // We assume user meant magnitude check: |elasticity| < critical
+     
+     if (agg_elasticity > max_elasticity) {
+       target += negative_infinity();
+     }
+  }
   
   if (use_cutoff == 1) cutoff_share ~ beta(3, 30);
   

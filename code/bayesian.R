@@ -11,266 +11,269 @@ library(readr)
 library(rstan)
 library(bridgesampling)
 library(jsonlite)
+library(loo)
+
+# Helper for logging
+log_msg <- function(...) {
+  cat(format(Sys.time(), "[%Y-%m-%d %H:%M:%S] "), ..., "\n")
+  flush.console()
+}
 
 # Process command line arguments
 args <- commandArgs(trailingOnly = TRUE)
 thismodel <- as.numeric(args[1])
-thismodel[is.na(thismodel)] <- 1 # run bertrand if no command line argument
+if (is.na(thismodel)) thismodel <- 1
 
-# Get chain count from command line (2nd argument)
 chain_count <- as.numeric(args[2])
-if (is.na(chain_count)) chain_count <- 4 # default to 4 chain
+if (is.na(chain_count)) chain_count <- 4
 
-# Get thread count from command line (3rd argument)
 thread_count <- as.numeric(args[3])
-if (is.na(thread_count)) thread_count <- 1 # default to 1 threads if not specified
+if (is.na(thread_count)) thread_count <- 1
 
-# Set up Stan parallelization
-options(mc.cores = chain_count) # Use 1 core per chain since we'll use threads within each chain
-rstan_options(auto_write = TRUE)
-Sys.setenv(STAN_NUM_THREADS = thread_count)
-
-# Configure Stan to use multiple threads per chain
-rstan_options(threads_per_chain = thread_count)
-
-# add arg to toggle cutoff (1 = enable, 0 = disable)
+# Toggle Cutoff (1=yes)
 use_cutoff <- as.numeric(args[4])
 if (is.na(use_cutoff)) use_cutoff <- 0
 
+# Toggle HMT Constraint (1=yes, default 0)
+use_hmt_arg <- as.numeric(args[5])
+if (is.na(use_hmt_arg)) use_hmt_arg <- 0
+
+# Set up Stan parallelization
+options(mc.cores = chain_count)
+rstan_options(auto_write = TRUE)
+Sys.setenv(STAN_NUM_THREADS = thread_count)
+rstan_options(threads_per_chain = thread_count)
+
 model_name <- c("bertrand", "2nd", "cournot", "moncom")
+log_msg(paste("Running Model:", model_name[thismodel], "| Chains:", chain_count, "| Threads:", thread_count))
+
 directory <- file.path(Sys.getenv("HOME"), "Projects", "mergerBayes")
 datadir <- file.path(directory, "data")
 resultsdir <- file.path(directory, "results")
 modelpath <- file.path(directory, "code", "bayesian.stan")
+
+# Default outfile (Panel)
 outfile <- file.path(resultsdir, paste0("stan_hhiperform_", model_name[thismodel], ".RData"))
+outfile_summary <- file.path(resultsdir, paste0("summary_", model_name[thismodel], ".rds"))
 
 # Ensure results directory exists
-if (!dir.exists(resultsdir)) {
-  dir.create(resultsdir, recursive = TRUE)
-  cat("Created results directory:", resultsdir, "\n")
-}
+if (!dir.exists(resultsdir)) dir.create(resultsdir, recursive = TRUE)
 
-# Load 2010-2020 bank merger data
+# Load Data
+log_msg("Loading data...")
 load(file = file.path(datadir, "banksimdata.RData"))
 
-# Filter for most recent 5 years (2016-2020) to reduce dimensionality
-# This significantly reduces N_event and N_tophold for faster convergence
-# Filter for 2014-2015 as requested
-# This significantly reduces N_event and N_tophold for faster convergence
+# Filter for 2014-2015 (Standard Panel Filter)
+# NOTE: If running PNB, you might want to adjust this filter manually or add logic.
+# For now, we assume simdata contains the relevant observations.
 simdata <- simdata %>% filter(year >= 2014 & year <= 2015)
+log_msg(paste("Data filtered. Rows:", nrow(simdata)))
 
-# Clean and process data for the Stan model
+# Clean and process data
 simdata <- simdata %>%
   filter(deposit_share > 0) %>%
   mutate(
-    # Unique market identifier (event_id + fedmkt)
     event_mkt = interaction(event_id, fedmkt, drop = TRUE),
     tophold = factor(tophold),
     year = factor(year),
-    # Map variables to names used in the original bayesian.R/stan
     shareIn = deposit_share,
-    # Convert percentage margin (e.g. 5.5) to decimal (0.055)
     margin = selected_margin / 100,
     rate_deposits = rate_call_report / 100,
-    # Set proxy for missing loan_rate (cost shifter)
-    rate_loans = 0
+    rate_loans = 0 # Proxy
   ) %>%
   mutate(margin = ifelse(margin <= 0, NA, margin)) %>%
   filter(!is.na(margin)) %>%
-  mutate(
-    event_mkt = droplevels(event_mkt),
-    tophold = droplevels(tophold),
-    year = droplevels(year)
-  ) %>%
+  droplevels() %>%
   arrange(event_mkt, year, tophold)
 
-# Market-level summary for hierarchical priors
-eventdata <- simdata %>%
-  group_by(event_mkt) %>%
-  summarise(
-    deposit_total_market = mean(deposit_total_market, na.rm = TRUE)
-  ) %>%
-  arrange(event_mkt)
+# ------------------------------------------------------------------------------
+# FILTER SMALL MARKETS (Mergers to Monopoly / Monopolies)
+# ------------------------------------------------------------------------------
+# Count firms per market-year
+mkt_counts <- simdata %>%
+  group_by(event_mkt, year) %>%
+  summarise(n_firms = n(), .groups = "drop")
 
-# Bank-level summary for hierarchical priors
-topholddata <- simdata %>%
-  group_by(tophold) %>%
-  summarise(
-    total_deposits = mean(deposits, na.rm = TRUE)
-  ) %>%
-  arrange(tophold)
+# Identify markets where ANY year has <= 2 firms (Monopoly or Duopoly)
+# Note: A merger to monopoly usually implies starting with 2 firms.
+bad_markets <- mkt_counts %>%
+  filter(n_firms <= 2) %>%
+  pull(event_mkt) %>%
+  unique()
 
-# Add market-year indices for parallelization
-simdata <- simdata %>%
-  mutate(market_year = interaction(event_mkt, year, drop = TRUE))
-
-market_years <- levels(simdata$market_year)
-N_market_year <- length(market_years)
-
-simdata <- simdata %>%
-  mutate(market_year_idx = as.numeric(market_year))
-
-# Check data dimensions
-cat("Number of observations after filtering:", nrow(simdata), "\n")
-cat("N_event (market units):", nlevels(simdata$event_mkt), "\n")
-cat("N_tophold:", nlevels(simdata$tophold), "\n")
-cat("N_year:", nlevels(simdata$year), "\n")
-
-# Stop if too few observations
-if (nrow(simdata) < 10) {
-  stop("Too few observations after filtering! Check your data source.")
+if (length(bad_markets) > 0) {
+  log_msg(paste("Dropping", length(bad_markets), "markets with <= 2 firms (Monopoly/Duopoly risk)."))
+  simdata <- simdata %>% filter(!event_mkt %in% bad_markets)
 }
 
-# Create stan_data with parallelization fields
+
+# ------------------------------------------------------------------------------
+# PNB / SINGLE MARKET DETECTION
+# ------------------------------------------------------------------------------
+n_markets <- nlevels(simdata$event_mkt)
+is_single_market <- ifelse(n_markets == 1, 1, 0)
+
+if (is_single_market == 1) {
+  log_msg(">>> DETECTED SINGLE MARKET MODE (PNB) <<<")
+  outfile <- file.path(resultsdir, paste0("stan_PNB_", model_name[thismodel], ".RData"))
+  outfile_summary <- file.path(resultsdir, paste0("summary_PNB_", model_name[thismodel], ".rds"))
+} else {
+  log_msg(paste("Panel Mode Detected. N_markets:", n_markets))
+}
+
+if (nrow(simdata) < 10) stop("Too few observations!")
+
+# ------------------------------------------------------------------------------
+# PREPARE HMT INPUTS
+# ------------------------------------------------------------------------------
+avg_price_hmt <- mean(simdata$rate_deposits, na.rm = TRUE)
+avg_margin_hmt <- mean(simdata$margin, na.rm = TRUE)
+ssnip_hmt <- 0.05
+
+# ------------------------------------------------------------------------------
+# PREPARE DATA LIST
+# ------------------------------------------------------------------------------
+
+# Hierarchical Summaries
+eventdata <- simdata %>%
+  group_by(event_mkt) %>%
+  summarise(deposit_total_market = mean(deposit_total_market, na.rm = TRUE))
+topholddata <- simdata %>%
+  group_by(tophold) %>%
+  summarise(total_deposits = mean(deposits, na.rm = TRUE))
+
+simdata <- simdata %>% mutate(market_year = interaction(event_mkt, year, drop = TRUE))
+simdata <- simdata %>% mutate(market_year_idx = as.numeric(market_year))
+N_market_year <- length(unique(simdata$market_year))
+
 stan_data <- list(
-  supply_model = as.integer(thismodel), # 1=Bertrand, 2=SSA, 3=Cournot, 4=MonCom
+  # --- Standard Inputs ---
+  supply_model = as.integer(thismodel),
   use_cutoff = as.integer(use_cutoff),
   N = nrow(simdata),
   shareIn = simdata$shareIn,
   marginInv = 1 / simdata$margin,
   rateDiff = as.numeric(scale(simdata$rate_deposits, center = TRUE, scale = TRUE)),
-  # Set scale to 1 if all zeros to avoid division by zero
   loan_rate = rep(0, nrow(simdata)),
+
+  # --- Indexing ---
   N_event = nlevels(simdata$event_mkt),
   event = as.integer(simdata$event_mkt),
   N_tophold = nlevels(simdata$tophold),
   tophold = as.integer(simdata$tophold),
-  log_deposits = as.numeric(scale(log(eventdata$deposit_total_market), center = TRUE, scale = TRUE)),
-  log_assets = as.numeric(scale(log(topholddata$total_deposits), center = TRUE, scale = TRUE)),
-  rateDiff_sd = sd(simdata$rate_deposits, na.rm = TRUE),
   N_year = nlevels(simdata$year),
   year = as.numeric(simdata$year),
   N_market_year = N_market_year,
   market_year_idx = as.integer(simdata$market_year_idx),
-  grainsize = max(1, round(nrow(simdata) / (10 * thread_count)))
+
+  # --- Covariates (Scaled) ---
+  log_deposits = as.numeric(scale(log(eventdata$deposit_total_market))),
+  log_assets = as.numeric(scale(log(topholddata$total_deposits))),
+  rateDiff_sd = sd(simdata$rate_deposits, na.rm = TRUE),
+  grainsize = max(1, round(nrow(simdata) / (10 * thread_count))),
+
+  # --- NEW FLAGS (PNB / HMT) ---
+  is_single_market = as.integer(is_single_market),
+  use_hmt = as.integer(use_hmt_arg),
+  avg_price_hmt = avg_price_hmt,
+  avg_margin_hmt = avg_margin_hmt,
+  ssnip_hmt = ssnip_hmt
 )
 
-# Export data for debugging if needed
+# Export for Debugging
 write_json(stan_data, file.path(datadir, "stan_data.json"), pretty = TRUE, auto_unbox = TRUE)
 
-# Compile the model
+log_msg("Data preparation complete. Compiling model...")
+
+# Compile
 model <- stan_model(modelpath)
 
-# Sample from the posterior
-# Adjust adapt_delta for Cournot (model 3) which is more prone to divergences
+# Sampling
 target_adapt_delta <- 0.95
-if (thismodel == 3) {
-  target_adapt_delta <- 0.99
-  cat("Increasing adapt_delta to 0.99 for Cournot model\n")
-}
+if (thismodel == 3) target_adapt_delta <- 0.99
+# If PNB mode, use higher adapt_delta
+if (is_single_market == 1) target_adapt_delta <- 0.99
 
-# Sample from the posterior
-system.time(fit <- sampling(
+log_msg(paste("Starting sampling (7000 iter, thin=5) | adapt_delta:", target_adapt_delta))
+
+fit <- sampling(
   model,
   data = stan_data,
   chains = chain_count,
-  init = 0,
   iter = 7000,
   warmup = 1500,
-  thin = 5, # Reduce saved draws by 5x (Save ~4400 total draws instead of 22000)
+  thin = 5,
   control = list(adapt_delta = target_adapt_delta, max_treedepth = 13)
-))
-
-# Build parameter lists for summaries
-base_pars <- c(
-  "a_event", "logit_mu_s0", "s0", "Rescor",
-  "sigma_logshare", "sigma_margin", "gamma_loan"
 )
+log_msg("Sampling complete.")
 
-if (stan_data$use_cutoff == 1) {
-  plot_pars <- c(base_pars, "cutoff_share")
-  sum_pars <- c(base_pars, "cutoff_share", "year_effect_demand", "year_effect_supply")
-} else {
-  plot_pars <- base_pars
-  sum_pars <- c(base_pars, "year_effect_demand", "year_effect_supply")
+# ------------------------------------------------------------------------------
+# SUMMARIES & SAVING
+# ------------------------------------------------------------------------------
+log_msg("Generating summaries...")
+
+# Adjust parameters to extract based on single market vs panel
+base_pars <- c("a_event", "logit_mu_s0", "s0", "Rescor", "sigma_logshare", "sigma_margin", "gamma_loan")
+# In single market mode, we care about the hyper-means mostly
+if (is_single_market == 1) {
+  # We might want to look at mu_log_a directly
+  base_pars <- c(base_pars, "mu_log_a")
 }
 
-# Generate summaries
-plot_sum <- try(plot(fit, pars = plot_pars))
-fit_sum <- try(summary(fit, pars = sum_pars)$summary)
+if (stan_data$use_cutoff == 1) sum_pars <- c(base_pars, "cutoff_share") else sum_pars <- base_pars
+# Add year effects if useful
+sum_pars <- c(sum_pars, "year_effect_demand", "year_effect_supply")
 
-# Bridge sampling for model comparison
-# Note: Bridge sampling often fails due to stanfit serialization issues
-# We use LOO for model comparison instead
-cat("\nAttempting bridge sampling (may fail due to technical limitations)...\n")
-bridge <- try({
-  # Re-assign model to fit object (sometimes helps)
-  fit@stanmodel <- model
-  bridge_sampler(fit, silent = FALSE, cores = thread_count, maxiter = 1000)
-}, silent = FALSE)
+fit_sum <- summary(fit, pars = sum_pars)$summary
 
-if (inherits(bridge, "try-error")) {
-  cat("Bridge sampling failed (expected). Using LOO for model comparison.\n")
-  cat("Error:", as.character(bridge), "\n")
-  bridge <- list(logml = NA, niter = 0, method = "failed", 
-                 error = as.character(bridge),
-                 note = "Use LOO for model comparison")
-} else if (is.na(bridge$logml)) {
-  cat("Bridge sampling returned NA. Using LOO for model comparison.\n")
-} else {
-  cat("Bridge sampling succeeded! logml =", bridge$logml, "\n")
-}
+# Negative margin check
+neg_count_samples <- try(rstan::extract(fit, "neg_margin_count")[[1]], silent = TRUE)
+neg_count_mean <- if (!inherits(neg_count_samples, "try-error")) mean(neg_count_samples) else NA
+log_msg(paste("Avg negative margins:", neg_count_mean))
 
-# LOO cross-validation (compute now, save result instead of raw log_lik draws)
-cat("Computing LOO cross-validation...\n")
-loo_result <- try(loo::loo(fit, cores = thread_count))
-if (!inherits(loo_result, "try-error")) {
-  cat("LOO elpd:", loo_result$estimates["elpd_loo", "Estimate"], "\n")
-}
+# Save SUMMARY immediately
+log_msg("Saving summary file...")
+saveRDS(list(summary = fit_sum, neg_margin_mean = neg_count_mean, stan_data = stan_data), file = outfile_summary)
 
-# Extract predicted margins for diagnostic
-neg_count_samples <- rstan::extract(fit, "neg_margin_count")[[1]]
-neg_count_mean <- mean(neg_count_samples)
-cat("Average number of negative predicted margins per draw:", neg_count_mean, "\n")
-
-# Extract only essential posterior draws to reduce file size
-# This replaces saving the full fit object (3GB -> ~50-100MB)
-cat("Extracting essential posteriors...\n")
-posteriors <- list(
-  a_event = rstan::extract(fit, "a_event")[[1]], # Price sensitivity by market
-  s0 = rstan::extract(fit, "s0")[[1]], # Outside share by market
-  b_event = rstan::extract(fit, "b_event")[[1]], # Market fixed effects
-  b_tophold_scaled = rstan::extract(fit, "b_tophold_scaled")[[1]], # Bank fixed effects (needed for compute_effects.R)
-  sigma_logshare = rstan::extract(fit, "sigma_logshare")[[1]],
-  sigma_margin = rstan::extract(fit, "sigma_margin")[[1]],
-  rho = rstan::extract(fit, "rho_gen")[[1]],
-  gamma_loan = rstan::extract(fit, "gamma_loan")[[1]],
-  year_effect_demand = rstan::extract(fit, "year_effect_demand")[[1]],
-  year_effect_supply = rstan::extract(fit, "year_effect_supply")[[1]],
-  neg_margin_count = neg_count_samples
-)
-
-# Add cutoff_share if using cutoff model
-if (stan_data$use_cutoff == 1) {
-  posteriors$cutoff_share <- rstan::extract(fit, "cutoff_share")[[1]]
-}
-
-# Save compact results (LOO + bridge + summaries + key posteriors)
-cat("Attempting to save to:", outfile, "\n")
-tryCatch(
+# LOO
+log_msg("Running LOO...")
+loo_result <- tryCatch(
   {
-    save(loo_result, bridge, plot_sum, fit_sum, posteriors, stan_data,
-      file = outfile, compress = "xz"
-    )
-    cat("Results saved successfully to:", outfile, "\n")
-
-    # Report file size
-    file_size_mb <- file.info(outfile)$size / 1024^2
-    cat("File size:", round(file_size_mb, 1), "MB\n")
+    loo(fit, cores = thread_count)
   },
   error = function(e) {
-    cat("ERROR saving results:", conditionMessage(e), "\n")
-    # Fallback: save even more minimal version
-    minimal_outfile <- sub("\\.RData$", "_minimal.RData", outfile)
-    cat("Attempting to save minimal results to:", minimal_outfile, "\n")
-    tryCatch(
-      {
-        save(loo_result, bridge, fit_sum, file = minimal_outfile, compress = "xz")
-        cat("Minimal results saved successfully.\n")
-      },
-      error = function(e2) {
-        cat("FATAL: Could not save even minimal results:", conditionMessage(e2), "\n")
-      }
-    )
+    log_msg("LOO Failed:", e$message)
+    return(NULL)
   }
 )
+if (!is.null(loo_result)) log_msg(paste("LOO ELPD:", loo_result$estimates["elpd_loo", "Estimate"]))
+
+# Bridge
+log_msg("Attempting Bridge Sampler...")
+bridge <- tryCatch(
+  {
+    fit@stanmodel <- model
+    bridge_sampler(fit, silent = TRUE, cores = thread_count, maxiter = 1000)
+  },
+  error = function(e) {
+    log_msg("Bridge Failed:", e$message)
+    return(NULL)
+  }
+)
+
+# Final Save
+log_msg(paste("Saving final results to:", outfile))
+tryCatch(
+  {
+    save(fit, loo_result, bridge, fit_sum, file = outfile, compress = "xz")
+    log_msg("Full results saved.")
+  },
+  error = function(e) {
+    log_msg("ERROR saving full results:", e$message)
+    log_msg("Attempting fallback save...")
+    posteriors <- rstan::extract(fit)
+    save(posteriors, loo_result, bridge, fit_sum, file = outfile, compress = "xz")
+  }
+)
+
+log_msg("Script finished successfully.")
