@@ -1,8 +1,11 @@
 rm(list = ls())
 library(loo)
 library(dplyr)
-library(rstan)
 
+# Updated to work with compact saved format (no full fit object)
+# Expected objects in RData: loo_result, bridge, plot_sum, fit_sum, posteriors, stan_data
+
+resultsdir <- file.path("results")
 datadir <- file.path("data")
 
 # Load results from all four models
@@ -10,13 +13,17 @@ models <- c("bertrand", "2nd", "cournot", "moncom")
 model_labels <- c("Bertrand", "Auction (2nd)", "Cournot", "Monopolistic Competition")
 n_models <- length(models)
 
-fits <- vector("list", n_models)
+posteriors_list <- vector("list", n_models)
 fits_sum <- vector("list", n_models)
 bridges <- vector("list", n_models)
+loo_list <- vector("list", n_models)
 
 for (m in 1:n_models) {
-  # Load RData files with new naming convention
-  infile <- file.path(datadir, paste0("stan_hhiperform_", models[m], ".RData"))
+  # Try new location first (results/), fallback to old (data/)
+  infile <- file.path(resultsdir, paste0("stan_hhiperform_", models[m], ".RData"))
+  if (!file.exists(infile)) {
+    infile <- file.path(datadir, paste0("stan_hhiperform_", models[m], ".RData"))
+  }
 
   if (!file.exists(infile)) {
     cat("Warning: File not found:", infile, "\n")
@@ -24,11 +31,38 @@ for (m in 1:n_models) {
   }
 
   cat("Loading", models[m], "results...\n")
-  load(infile) # loads fit, bridge, plot_sum, fit_sum
+  load(infile)
 
-  fits[[m]] <- fit
+  # Check format: new compact format has 'posteriors' and 'loo_result',
+  # old format has 'fit'
+  if (exists("posteriors")) {
+    # New compact format
+    posteriors_list[[m]] <- posteriors
+    loo_list[[m]] <- loo_result
+    cat("  (compact format)\n")
+  } else if (exists("fit")) {
+    # Legacy format with full fit object - extract what we need
+    cat("  (legacy format - extracting posteriors)\n")
+    posteriors_list[[m]] <- list(
+      a_event = rstan::extract(fit, "a_event")[[1]],
+      s0 = rstan::extract(fit, "s0")[[1]],
+      b_event = rstan::extract(fit, "b_event")[[1]],
+      sigma_logshare = rstan::extract(fit, "sigma_logshare")[[1]],
+      sigma_margin = rstan::extract(fit, "sigma_margin")[[1]],
+      rho = rstan::extract(fit, "rho_gen")[[1]],
+      gamma_loan = rstan::extract(fit, "gamma_loan")[[1]]
+    )
+    # Compute LOO from legacy fit
+    cat("  Computing LOO for", models[m], "...\n")
+    log_lik_m <- loo::extract_log_lik(fit)
+    loo_list[[m]] <- loo::loo(log_lik_m, cores = 4)
+  }
+
   fits_sum[[m]] <- fit_sum
   bridges[[m]] <- bridge
+
+  # Clean up to avoid cross-contamination
+  rm(list = intersect(c("fit", "posteriors", "loo_result", "bridge", "fit_sum", "plot_sum", "stan_data"), ls()))
 }
 
 # 1. Compute overall model probabilities using bridge sampling
@@ -67,33 +101,26 @@ model_probs_df <- data.frame(
 print("Model Probabilities:")
 print(model_probs_df)
 
-# 2. Compute LOO for model comparison
-cat("\n=== Computing LOO ===\n")
+# 2. LOO comparison (already computed, just compare)
+cat("\n=== LOO Model Comparison ===\n")
 
-loo_list <- vector("list", n_models)
-
-for (m in which(valid_models)) {
-  cat("Computing LOO for", models[m], "...\n")
-  log_lik_m <- extract_log_lik(fits[[m]])
-  loo_list[[m]] <- loo(log_lik_m, cores = 4)
+# Filter to valid models with LOO results
+valid_loo <- sapply(loo_list, function(x) !is.null(x) && !inherits(x, "try-error"))
+if (sum(valid_loo) >= 2) {
+  loo_compare_result <- loo_compare(loo_list[valid_loo])
+  print("LOO Model Comparison:")
+  print(loo_compare_result)
+} else {
+  cat("Not enough valid LOO results to compare.\n")
+  loo_compare_result <- NULL
 }
-
-# Compare models using LOO
-loo_compare_result <- loo_compare(loo_list[valid_models])
-print("LOO Model Comparison:")
-print(loo_compare_result)
 
 # 3. Bayesian Model Averaging (BMA) for a_event and s0
 cat("\n=== Computing Bayesian Model Averaging ===\n")
 
-# Extract parameter samples
-a_event_samples <- lapply(fits[valid_models], function(f) {
-  rstan::extract(f, pars = "a_event")[[1]]
-})
-
-s0_samples <- lapply(fits[valid_models], function(f) {
-  rstan::extract(f, pars = "s0")[[1]]
-})
+# Extract parameter samples from posteriors
+a_event_samples <- lapply(posteriors_list[valid_models], function(p) p$a_event)
+s0_samples <- lapply(posteriors_list[valid_models], function(p) p$s0)
 
 # Check dimensions
 n_events <- dim(s0_samples[[1]])[2]
@@ -147,10 +174,11 @@ cat("\nBayesian Model Averaged Outside Shares (first 10 events):\n")
 print(head(s0_bma_summary_prob, 10))
 
 # Save results
+outdir <- if (dir.exists(resultsdir)) resultsdir else datadir
 save(
   model_probs_df, loo_list, loo_compare_result,
   a_event_bma_summary, s0_bma_summary, s0_bma_summary_prob,
-  file = file.path(datadir, "model_comparison_results.RData")
+  file = file.path(outdir, "model_comparison_results.RData")
 )
 
-cat("\n=== Results saved to data/model_comparison_results.RData ===\n")
+cat("\n=== Results saved to", file.path(outdir, "model_comparison_results.RData"), "===\n")
