@@ -106,6 +106,14 @@ if (length(bad_markets) > 0) {
   simdata <- simdata %>% filter(!event_mkt %in% bad_markets)
 }
 
+# Re-level factors after filtering
+simdata <- simdata %>%
+  mutate(
+    event_mkt = droplevels(event_mkt),
+    tophold = droplevels(tophold),
+    year = droplevels(year)
+  )
+
 
 # ------------------------------------------------------------------------------
 # PNB / SINGLE MARKET DETECTION
