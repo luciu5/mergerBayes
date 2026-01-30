@@ -38,6 +38,15 @@ if (is.na(use_cutoff)) use_cutoff <- 0
 use_hmt_arg <- as.numeric(args[5])
 if (is.na(use_hmt_arg)) use_hmt_arg <- 0
 
+# Data Subsampling Fraction (0 to 1, default 1.0)
+data_frac <- as.numeric(args[6])
+if (is.na(data_frac)) data_frac <- 1.0
+
+# Year Filter (2014, 2015, or 0 for both)
+filter_year_arg <- as.numeric(args[7])
+if (is.na(filter_year_arg)) filter_year_arg <- 0
+
+
 # Set up Stan parallelization
 options(mc.cores = chain_count)
 rstan_options(auto_write = TRUE)
@@ -113,6 +122,40 @@ simdata <- simdata %>%
     tophold = droplevels(tophold),
     year = droplevels(year)
   )
+
+# ------------------------------------------------------------------------------
+# DATA REDUCTION (Optional)
+# ------------------------------------------------------------------------------
+
+# 1. Year Filter
+if (filter_year_arg > 0) {
+  log_msg(paste("Filtering for Year:", filter_year_arg))
+  simdata <- simdata %>% filter(year == filter_year_arg)
+}
+
+# 2. Random Subsample (Market-Level)
+if (data_frac < 1.0 && data_frac > 0) {
+  log_msg(paste("Subsampling", data_frac * 100, "% of markets..."))
+  all_markets <- levels(droplevels(simdata$event_mkt))
+  n_keep <- max(5, round(length(all_markets) * data_frac))
+  
+  set.seed(42) # Ensure reproducible subsamples
+  keep_markets <- sample(all_markets, n_keep)
+  
+  simdata <- simdata %>% filter(event_mkt %in% keep_markets)
+  log_msg(paste("Reduced to", n_keep, "markets."))
+}
+
+if (filter_year_arg > 0 || data_frac < 1.0) {
+    # Re-level again after subsampling
+    simdata <- simdata %>%
+      mutate(
+        event_mkt = droplevels(event_mkt),
+        tophold = droplevels(tophold),
+        year = droplevels(year)
+      )
+}
+
 
 
 # ------------------------------------------------------------------------------
@@ -257,17 +300,30 @@ loo_result <- tryCatch(
 if (!is.null(loo_result)) log_msg(paste("LOO ELPD:", loo_result$estimates["elpd_loo", "Estimate"]))
 
 # Bridge
-log_msg("Attempting Bridge Sampler...")
+# Bridge
+log_msg("Attempting Bridge Sampler (High Iteration)...")
 bridge <- tryCatch(
   {
     fit@stanmodel <- model
-    bridge_sampler(fit, silent = TRUE, cores = thread_count, maxiter = 1000)
+    # First attempt: Standard Normal with more iterations
+    bridge_sampler(fit, silent = FALSE, cores = thread_count, maxiter = 10000, method = "normal")
   },
   error = function(e) {
-    log_msg("Bridge Failed:", e$message)
-    return(NULL)
+    log_msg("Bridge (Normal) Failed:", e$message)
+    log_msg("Attempting Bridge Sampler (Warp3)...")
+    tryCatch(
+      {
+         # Second attempt: Warp3 method (slower but robust)
+         bridge_sampler(fit, silent = FALSE, cores = thread_count, maxiter = 5000, method = "warp3")
+      }, 
+      error = function(e2) {
+         log_msg("Bridge (Warp3) Failed:", e2$message)
+         return(NULL)
+      }
+    )
   }
 )
+
 
 # Final Save
 log_msg(paste("Saving final results to:", outfile))
