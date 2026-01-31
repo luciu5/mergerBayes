@@ -175,7 +175,9 @@ kable(pnb_summary, digits = 3, caption = "Summary Statistics: PNB Case Data (196
 
 ## Model Comparison Results
 
-We run our Bayesian Model Comparison on this single-market dataset, using Bridge Sampling to compute the marginal likelihoods. The results provide decisive evidence in favor of the **Monopolistic Competition** model.
+We run our Bayesian Model Comparison on this single-market dataset using a **Strict Structural Specification** (mimicking standard antitrust calibration). We remove the supply intercept to force $\alpha$ to match the margin levels, and we use random effects to fit demand shares.
+
+The results below show the comparison. Note that while **Monopolistic Competition** is favored, the overall fit is constrained by the tension between the margin-implied elasticity and the observed price-share correlations.
 
 ```{r pnb_results, echo=FALSE, message=FALSE, warning=FALSE}
 # Load Model Results
