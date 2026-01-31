@@ -73,7 +73,8 @@ sdata_template <- list(
   shareIn = simdata$shareIn,
   marginInv = simdata$marginInv,
   rateDiff = as.numeric(scale(simdata$rate_deposits)),
-  loan_rate = rep(0, nrow(simdata)),
+  rateDiff = as.numeric(scale(simdata$rate_deposits)),
+  # REMOVED loan_rate
   
   N_event = 1, 
   event = rep(1L, nrow(simdata)),
@@ -82,8 +83,9 @@ sdata_template <- list(
   tophold = as.integer(simdata$tophold),
   
   # Covariates - ASSETS REMOVED (Replaced by Random Effects)
+  # Covariates - ASSETS REMOVED
   log_deposits = as.array(0.0),  
-  log_assets = rep(0.0, nlevels(simdata$tophold)), # Zero out assets to avoid circularity fit
+  # REMOVED log_assets
   
   rateDiff_sd = sd(simdata$rate_deposits),
   
@@ -105,7 +107,8 @@ sdata_template <- list(
   
   # --- PRIOR SCALES (Data Driven) ---
   prior_sigma_share = sd_logshare, 
-  prior_sigma_margin = sd_marginInv
+  prior_sigma_margin = sd_marginInv,
+  prior_sigma_meanval = 2.0 # Adjusted to 2.0 (User Request)
 )
 
 # Compile Model
@@ -206,10 +209,10 @@ run_batch <- function(sdata, suffix) {
 # 1. Standard Run
 run_batch(sdata_template, "")
 
-# 2. HMT Constrained Run
-# sdata_hmt <- sdata_template
-# sdata_hmt$use_hmt <- 1L
-# run_batch(sdata_hmt, "_hmt")
+# 2. HMT Constrained Run (Strict + HMT)
+sdata_hmt <- sdata_template
+sdata_hmt$use_hmt <- 1L
+run_batch(sdata_hmt, "_hmt")
 
 # 3. Fixed Supply Intercept Run (Strict Prop 1)
 # sdata_fixed <- sdata_template

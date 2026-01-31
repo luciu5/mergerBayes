@@ -221,7 +221,8 @@ stan_data <- list(
   shareIn = simdata$shareIn,
   marginInv = 1 / simdata$margin,
   rateDiff = as.numeric(scale(simdata$rate_deposits, center = TRUE, scale = TRUE)),
-  loan_rate = rep(0, nrow(simdata)),
+  rateDiff = as.numeric(scale(simdata$rate_deposits, center = TRUE, scale = TRUE)),
+  # REMOVED loan_rate
 
   # --- Indexing ---
   N_event = nlevels(simdata$event_mkt),
@@ -235,7 +236,7 @@ stan_data <- list(
 
   # --- Covariates (Scaled) ---
   log_deposits = as.numeric(scale(log(eventdata$deposit_total_market))),
-  log_assets = rep(0, nlevels(simdata$tophold)), # REMOVED ASSETS: Avoid circularity
+  # REMOVED log_assets
   rateDiff_sd = sd(simdata$rate_deposits, na.rm = TRUE),
   grainsize = max(1, round(nrow(simdata) / (10 * thread_count))),
 
@@ -249,7 +250,8 @@ stan_data <- list(
   
   # --- PRIOR SCALES (Data Driven) ---
   prior_sigma_share = sd(log(simdata$shareIn), na.rm = TRUE),
-  prior_sigma_margin = sd(1 / simdata$margin, na.rm = TRUE)
+  prior_sigma_margin = sd(1 / simdata$margin, na.rm = TRUE),
+  prior_sigma_meanval = 0.5 # Standard tight prior for Panel Hierarchical Model
 )
 
 # Export for Debugging
