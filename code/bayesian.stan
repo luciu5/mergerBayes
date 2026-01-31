@@ -232,7 +232,8 @@ model {
     sigma_year_supply ~ normal(0, 0.001);
     
     // RELAXED: Allow bank heterogeneity (Random Effects) to mimic Calibration delta_j
-    sigma_b_event ~ normal(0, 0.5);   
+    // INCREASED VARIANCE: normal(0, 5.0) to allow large Mean Valuations to compensate for strict alpha
+    sigma_b_event ~ normal(0, 5.0);   
     b_event_raw ~ std_normal();
     
     sigma_b_tophold ~ normal(0, 0.001);
