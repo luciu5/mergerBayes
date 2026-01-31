@@ -235,7 +235,7 @@ stan_data <- list(
 
   # --- Covariates (Scaled) ---
   log_deposits = as.numeric(scale(log(eventdata$deposit_total_market))),
-  log_assets = as.numeric(scale(log(topholddata$total_deposits))),
+  log_assets = rep(0, nlevels(simdata$tophold)), # REMOVED ASSETS: Avoid circularity
   rateDiff_sd = sd(simdata$rate_deposits, na.rm = TRUE),
   grainsize = max(1, round(nrow(simdata) / (10 * thread_count))),
 
