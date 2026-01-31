@@ -81,9 +81,9 @@ sdata_template <- list(
   N_tophold = nlevels(simdata$tophold), 
   tophold = as.integer(simdata$tophold),
   
-  # Covariates
+  # Covariates - ASSETS REMOVED (Replaced by Random Effects)
   log_deposits = as.array(0.0),  
-  log_assets = as.numeric(scale(log(bank_assets))),
+  log_assets = rep(0.0, nlevels(simdata$tophold)), # Zero out assets to avoid circularity fit
   
   rateDiff_sd = sd(simdata$rate_deposits),
   
@@ -98,6 +98,7 @@ sdata_template <- list(
   # --- SINGLE MARKET MODE ---
   is_single_market = 1L,
   use_hmt = 0L, # Default off
+  fix_supply_intercept = 1L, # Enforce Supply Intercept = 0 (Calibration Style)
   avg_price_hmt = mean(simdata$rate_deposits),
   avg_margin_hmt = mean(simdata$margin),
   ssnip_hmt = 0.05,
@@ -151,9 +152,16 @@ run_batch <- function(sdata, suffix) {
     p_sigmam_mean <- mean(post$sigma_margin); p_sigmam_sd <- sd(post$sigma_margin)
     p_sigmas_mean <- mean(post$sigma_logshare); p_sigmas_sd <- sd(post$sigma_logshare)
     
+    # Validation
+    y1_pred <- colMeans(post$pred_logshareIn)
+    y2_pred <- colMeans(post$pred_marginInv)
+    rmse_share <- sqrt(mean((log(sdata$shareIn) - y1_pred)^2))
+    rmse_margin <- sqrt(mean((sdata$marginInv - y2_pred)^2))
+    
     results[[model_name]] <- list(
       Model = model_name, Divergences = divs, LogML = logml,
-      Alpha = p_alpha_mean, S0 = p_s0_mean, Rho = p_rho_mean, SigmaMargin = p_sigmam_mean,
+      Alpha = p_alpha_mean, S0 = p_s0_mean, Rho = p_rho_mean,
+      RMSE_Share = rmse_share, RMSE_Margin = rmse_margin,
       details = data.frame(
         Parameter = c("Alpha", "S0", "Sigma_Share", "Sigma_Margin", "Rho"),
         Mean = c(p_alpha_mean, p_s0_mean, p_sigmas_mean, p_sigmam_mean, p_rho_mean),
@@ -199,6 +207,11 @@ run_batch <- function(sdata, suffix) {
 run_batch(sdata_template, "")
 
 # 2. HMT Constrained Run
-sdata_hmt <- sdata_template
-sdata_hmt$use_hmt <- 1L
-run_batch(sdata_hmt, "_hmt")
+# sdata_hmt <- sdata_template
+# sdata_hmt$use_hmt <- 1L
+# run_batch(sdata_hmt, "_hmt")
+
+# 3. Fixed Supply Intercept Run (Strict Prop 1)
+# sdata_fixed <- sdata_template
+# sdata_fixed$fix_supply_intercept <- 1L
+# run_batch(sdata_fixed, "_fixed")

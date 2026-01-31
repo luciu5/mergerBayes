@@ -134,6 +134,7 @@ data {
   // --- NEW CONTROL FLAGS ---
   int<lower=0, upper=1> is_single_market;  // 1 = PNB (Simple), 0 = Panel (Complex)
   int<lower=0, upper=1> use_hmt;           // 1 = Enforce Legal Constraint
+  int<lower=0, upper=1> fix_supply_intercept; // 1 = Force Supply Intercept to 0 (Strict Structural Test)
   
   // Data needed for HMT (Pass 0 if use_hmt=0)
   real avg_price_hmt;   
@@ -229,15 +230,18 @@ model {
     sigma_log_a ~ normal(0, 0.001);       // Shrink variance to 0
     sigma_year_demand ~ normal(0, 0.001); 
     sigma_year_supply ~ normal(0, 0.001);
-    sigma_b_event ~ normal(0, 0.001);
+    
+    // RELAXED: Allow bank heterogeneity (Random Effects) to mimic Calibration delta_j
+    sigma_b_event ~ normal(0, 0.5);   
+    b_event_raw ~ std_normal();
+    
     sigma_b_tophold ~ normal(0, 0.001);
     tau_s0 ~ normal(0, 0.001);
     
-    // Force the random effects to 0
+    // Shrink other REs
     r_event_a_raw ~ normal(0, 0.001);
     year_raw_demand ~ normal(0, 0.001);
     year_raw_supply ~ normal(0, 0.001);
-    b_event_raw ~ normal(0, 0.001);
     b_tophold_raw ~ normal(0, 0.001);
     s0_raw ~ normal(0, 0.001);
     
@@ -260,7 +264,15 @@ model {
   
   // Common priors for the means (apply to both)
   mu_year_demand ~ std_normal();
-  mu_year_supply ~ std_normal();
+  
+  if (fix_supply_intercept == 1) {
+    mu_year_supply ~ normal(0, 0.001); // Force Intercept to 0
+    sigma_year_supply ~ normal(0, 0.001); 
+    year_raw_supply ~ normal(0, 0.001);
+  } else {
+    mu_year_supply ~ std_normal();
+    // Sigma and raw are handled in the conditional block or implicitly standard
+  }
   
   // ------------------------------------------------------------
   // SINGLE YEAR MODE HANDLING
@@ -348,6 +360,8 @@ generated quantities {
   
   // log_lik for LOO cross-validation (computed, then LOO result saved to reduce file size)
   vector[N] log_lik;
+  vector[N] pred_logshareIn;
+  vector[N] pred_marginInv;
   int<lower=0> neg_margin_count = 0;
   
   {
@@ -394,12 +408,13 @@ generated quantities {
        
        real mu2 = inv_markup + gamma_loan * loan_rate[n] + year_effect_supply[year[n]];
        
-       real y1 = logshareIn[n];
-       real y2 = marginInv[n];
-       real mu2_cond = mu2 + slope_cond * (y1 - mu1);
+       pred_logshareIn[n] = mu1;
+       pred_marginInv[n] = mu2;
        
-       log_lik[n] = normal_lpdf(y1 | mu1, sigma_logshare) + 
-                    normal_lpdf(y2 | mu2_cond, sigma_cond);
+       real mu2_cond = mu2 + slope_cond * (logshareIn[n] - mu1);
+       
+       log_lik[n] = normal_lpdf(logshareIn[n] | mu1, sigma_logshare) + 
+                    normal_lpdf(marginInv[n] | mu2_cond, sigma_cond);
      }
   }
 }

@@ -242,6 +242,7 @@ stan_data <- list(
   # --- NEW FLAGS (PNB / HMT) ---
   is_single_market = as.integer(is_single_market),
   use_hmt = as.integer(use_hmt_arg),
+  fix_supply_intercept = 0L, # Default: Allow supply intercept
   avg_price_hmt = avg_price_hmt,
   avg_margin_hmt = avg_margin_hmt,
   ssnip_hmt = ssnip_hmt,
