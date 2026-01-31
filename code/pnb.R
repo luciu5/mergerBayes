@@ -165,7 +165,11 @@ run_batch <- function(sdata, suffix) {
   # --- SUMMARY TABLES ---
   df_res <- bind_rows(lapply(results, function(x) x[names(x) != "details"]))
   max_logml <- max(df_res$LogML, na.rm = TRUE)
-  df_res <- df_res %>% mutate(diff_logml = LogML - max_logml, posterior_prob = exp(diff_logml) / sum(exp(diff_logml), na.rm=TRUE)) %>% arrange(desc(LogML))
+  df_res <- df_res %>% mutate(
+    diff_logml = LogML - max_logml, 
+    bayes_factor_vs_best = exp(diff_logml),
+    posterior_prob = exp(diff_logml) / sum(exp(diff_logml), na.rm=TRUE)
+  ) %>% arrange(desc(LogML))
   
   outfile_res <- file.path(resultsdir, paste0("pnb_model_results", suffix, ".csv"))
   write_csv(df_res, outfile_res)

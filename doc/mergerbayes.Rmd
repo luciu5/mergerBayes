@@ -180,6 +180,7 @@ We run our Bayesian Model Comparison on this single-market dataset, using Bridge
 ```{r pnb_results, echo=FALSE, message=FALSE, warning=FALSE}
 # Load Model Results
 pnb_res <- read_csv("../results/pnb_model_results.csv", show_col_types = FALSE) %>%
+  mutate(bayes_factor_vs_best = exp(LogML - max(LogML, na.rm = TRUE))) %>%
   select(Model, LogML, posterior_prob, bayes_factor_vs_best) %>%
   rename("Posterior Prob" = posterior_prob, "Bayes Factor" = bayes_factor_vs_best)
 
@@ -210,6 +211,7 @@ As a robustness check, we re-estimate the models imposing the **Hypothetical Mon
 hmt_file <- "../results/pnb_model_results_hmt.csv"
 if(file.exists(hmt_file)) {
     hmt_res <- read_csv(hmt_file, show_col_types = FALSE) %>%
+      mutate(bayes_factor_vs_best = exp(LogML - max(LogML, na.rm = TRUE))) %>%
       select(Model, LogML, posterior_prob, bayes_factor_vs_best) %>%
       rename("Posterior Prob" = posterior_prob, "Bayes Factor" = bayes_factor_vs_best)
     
