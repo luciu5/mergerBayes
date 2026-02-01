@@ -182,9 +182,9 @@ The results below show the comparison. Note that while **Monopolistic Competitio
 ```{r pnb_results, echo=FALSE, message=FALSE, warning=FALSE}
 # Load Model Results
 pnb_res <- read_csv("../results/pnb_model_results.csv", show_col_types = FALSE) %>%
-  mutate(bayes_factor_vs_best = exp(LogML - max(LogML, na.rm = TRUE))) %>%
-  select(Model, LogML, posterior_prob, bayes_factor_vs_best) %>%
-  rename("Posterior Prob" = posterior_prob, "Bayes Factor" = bayes_factor_vs_best)
+  mutate(bayes_factor_vs_best = tryCatch(exp(LogML - max(LogML, na.rm = TRUE)), error=function(e) NA)) %>%
+  select(Model, LogML, LOOIC, RMSE_Share, Alpha) %>%
+  rename("RMSE" = RMSE_Share)
 
 kable(pnb_res, digits = 2, caption = "Bayesian Model Comparison: PNB Case") %>%
   kable_styling(latex_options = c("striped", "hold_position"))

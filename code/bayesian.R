@@ -242,16 +242,17 @@ stan_data <- list(
 
   # --- NEW FLAGS (PNB / HMT) ---
   is_single_market = as.integer(is_single_market),
+  use_cutoff = 1L, # Default: Hybrid Model (Small=MonCom)
   use_hmt = as.integer(use_hmt_arg),
   fix_supply_intercept = 0L, # Default: Allow supply intercept
   avg_price_hmt = avg_price_hmt,
   avg_margin_hmt = avg_margin_hmt,
   ssnip_hmt = ssnip_hmt,
   
-  # --- PRIOR SCALES (Data Driven) ---
   prior_sigma_share = sd(log(simdata$shareIn), na.rm = TRUE),
   prior_sigma_margin = sd(1 / simdata$margin, na.rm = TRUE),
-  prior_sigma_meanval = 0.5 # Standard tight prior for Panel Hierarchical Model
+  prior_sigma_meanval_strat = 0.5, # Standard for Panel Strategic
+  prior_sigma_meanval_fringe = 0.2 # Tight for Panel Fringe
 )
 
 # Export for Debugging

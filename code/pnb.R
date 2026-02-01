@@ -108,7 +108,9 @@ sdata_template <- list(
   # --- PRIOR SCALES (Data Driven) ---
   prior_sigma_share = sd_logshare, 
   prior_sigma_margin = sd_marginInv,
-  prior_sigma_meanval = 2.0 # Adjusted to 2.0 (User Request)
+  prior_sigma_meanval_strat = 2.0,  # Loose for Strategic
+  prior_sigma_meanval_fringe = 0.2  # Tight for Fringe
+
 )
 
 # Compile Model
@@ -147,6 +149,11 @@ run_batch <- function(sdata, suffix) {
     logml <- if (!is.null(logml_res)) logml_res$logml else NA
     cat(sprintf("LogML: %.2f\n", logml))
     
+    # LOO
+    loo_res <- tryCatch({ loo(fit) }, error = function(e){NULL})
+    looic <- if (!is.null(loo_res)) loo_res$estimates["looic", "Estimate"] else NA
+    cat(sprintf("LOOIC: %.2f\n", looic))
+    
     # Extract
     post <- rstan::extract(fit)
     p_alpha_mean <- mean(post$a_event); p_alpha_sd <- sd(post$a_event)
@@ -162,7 +169,7 @@ run_batch <- function(sdata, suffix) {
     rmse_margin <- sqrt(mean((sdata$marginInv - y2_pred)^2))
     
     results[[model_name]] <- list(
-      Model = model_name, Divergences = divs, LogML = logml,
+      Model = model_name, Divergences = divs, LogML = logml, LOOIC = looic,
       Alpha = p_alpha_mean, S0 = p_s0_mean, Rho = p_rho_mean,
       RMSE_Share = rmse_share, RMSE_Margin = rmse_margin,
       details = data.frame(
