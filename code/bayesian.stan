@@ -262,7 +262,7 @@ model {
      target += soft_hmt_penalty(agg_elasticity, max_elasticity, 0.01);
   }
   
-  if (use_cutoff == 1) cutoff_share ~ beta(3, 30);
+  if (use_cutoff == 1) cutoff_share ~ beta(3, 100);
   
   // REMOVED gamma_loan prior
   

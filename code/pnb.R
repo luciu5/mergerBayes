@@ -68,7 +68,7 @@ bank_assets <- simdata$total_assets
 
 # Stan Data Preparation (Template)
 sdata_template <- list(
-  use_cutoff = 0L,
+  use_cutoff = 1L,
   N = nrow(simdata),
   shareIn = simdata$shareIn,
   marginInv = simdata$marginInv,
