@@ -37,7 +37,7 @@ echo "=== Job ${SLURM_JOB_ID} | Model ${SLURM_ARRAY_TASK_ID} (${MODEL_NAME}) | S
 # Run the R script, capturing exit code
 # Args: [model_id] [chains] [threads] [use_cutoff] [use_hmt] [data_frac] [filter_year]
 # Running for Year 2014 (High Variation) with 100% of data
-srun Rscript ${HOME}/Projects/mergerBayes/code/bayesian.R ${SLURM_ARRAY_TASK_ID} $STAN_NUM_CHAINS $STAN_NUM_THREADS 0 0 1.0 2014
+srun Rscript ${HOME}/Projects/mergerBayes/code/bayesian.R ${SLURM_ARRAY_TASK_ID} $STAN_NUM_CHAINS $STAN_NUM_THREADS 0 0 1.0 2014-2015
 EXIT_CODE=$?
 
 # Status check after run

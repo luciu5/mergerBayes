@@ -129,7 +129,7 @@ sdata_template <- list(
 
   # --- PRIOR SCALES ---
   # TEST: Tight Share (Hard Data) vs Relaxed Margin (Soft Data)
-  prior_sigma_share = 0.05,
+  prior_sigma_share = 0.10,
   prior_sigma_margin = 1.0, # Multiplier for margin prior (Very loose)
   prior_sigma_meanval_strat = 1.5,
   prior_sigma_meanval_fringe = 0.2
