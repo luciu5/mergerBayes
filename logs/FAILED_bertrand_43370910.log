@@ -1,0 +1,170 @@
+=== Job 43370910 | Model 1 (bertrand) | Started Sun Feb  1 23:17:47 EST 2026 ===
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+
+Attaching package: ‘kableExtra’
+
+The following object is masked from ‘package:dplyr’:
+
+    group_rows
+
+Loading required package: StanHeaders
+
+rstan version 2.32.6 (Stan version 2.32.2)
+
+For execution on a local, multicore CPU with excess RAM we recommend calling
+options(mc.cores = parallel::detectCores()).
+To avoid recompilation of unchanged Stan programs, we recommend calling
+rstan_options(auto_write = TRUE)
+For within-chain threading using `reduce_sum()` or `map_rect()` Stan functions,
+change `threads_per_chain` option:
+rstan_options(threads_per_chain = 1)
+
+
+Attaching package: ‘rstan’
+
+The following object is masked from ‘package:tidyr’:
+
+    extract
+
+This is loo version 2.8.0
+- Online documentation and vignettes at mc-stan.org/loo
+- As of v2.0.0 loo defaults to 1 core but we recommend using as many as possible. Use the 'cores' argument or set options(mc.cores = NUM_CORES) for an entire session. 
+
+Attaching package: ‘loo’
+
+The following object is masked from ‘package:rstan’:
+
+    loo
+
+[2026-02-01 23:17:52]  Running Model: bertrand | Chains: 4 | Threads: 8 
+[2026-02-01 23:17:52]  Loading data... 
+[2026-02-01 23:17:52]  Data filtered. Rows: 16009 
+[2026-02-01 23:17:52]  Dropping 3 markets with <= 2 firms (Monopoly/Duopoly risk). 
+[2026-02-01 23:17:53]  Filtering for Year Range: 2014 - 2015 
+[2026-02-01 23:17:53]  Panel Mode Detected. N_markets: 261 
+[2026-02-01 23:17:53]  Removing firms with share < 1 % 
+[2026-02-01 23:17:53]  Data preparation complete. Compiling model... 
+[2026-02-01 23:17:54]  Starting sampling (4000 iter, thin=2) | adapt_delta: 0.95 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 1).
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 2).
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 3).
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 4).
+Chain 1: 
+Chain 1: Gradient evaluation took 0.008616 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 86.16 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+Chain 4: 
+Chain 4: Gradient evaluation took 0.01215 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 121.5 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+Chain 1: Iteration:    1 / 4000 [  0%]  (Warmup)
+Chain 3: 
+Chain 3: Gradient evaluation took 0.013845 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 138.45 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+Chain 2: 
+Chain 2: Gradient evaluation took 0.02364 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 236.4 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+Chain 4: Iteration:    1 / 4000 [  0%]  (Warmup)
+Chain 3: Iteration:    1 / 4000 [  0%]  (Warmup)
+Chain 2: Iteration:    1 / 4000 [  0%]  (Warmup)
+Chain 4: Iteration:  400 / 4000 [ 10%]  (Warmup)
+Chain 3: Iteration:  400 / 4000 [ 10%]  (Warmup)
+Chain 2: Iteration:  400 / 4000 [ 10%]  (Warmup)
+Chain 1: Iteration:  400 / 4000 [ 10%]  (Warmup)
+Chain 4: Iteration:  800 / 4000 [ 20%]  (Warmup)
+Chain 3: Iteration:  800 / 4000 [ 20%]  (Warmup)
+Chain 2: Iteration:  800 / 4000 [ 20%]  (Warmup)
+Chain 4: Iteration: 1001 / 4000 [ 25%]  (Sampling)
+Chain 3: Iteration: 1001 / 4000 [ 25%]  (Sampling)
+Chain 1: Iteration:  800 / 4000 [ 20%]  (Warmup)
+Chain 2: Iteration: 1001 / 4000 [ 25%]  (Sampling)
+Chain 1: Iteration: 1001 / 4000 [ 25%]  (Sampling)
+Chain 4: Iteration: 1400 / 4000 [ 35%]  (Sampling)
+Chain 3: Iteration: 1400 / 4000 [ 35%]  (Sampling)
+Chain 2: Iteration: 1400 / 4000 [ 35%]  (Sampling)
+Chain 1: Iteration: 1400 / 4000 [ 35%]  (Sampling)
+Chain 4: Iteration: 1800 / 4000 [ 45%]  (Sampling)
+Chain 3: Iteration: 1800 / 4000 [ 45%]  (Sampling)
+Chain 2: Iteration: 1800 / 4000 [ 45%]  (Sampling)
+Chain 1: Iteration: 1800 / 4000 [ 45%]  (Sampling)
+Chain 4: Iteration: 2200 / 4000 [ 55%]  (Sampling)
+Chain 3: Iteration: 2200 / 4000 [ 55%]  (Sampling)
+Chain 2: Iteration: 2200 / 4000 [ 55%]  (Sampling)
+Chain 4: Iteration: 2600 / 4000 [ 65%]  (Sampling)
+Chain 1: Iteration: 2200 / 4000 [ 55%]  (Sampling)
+Chain 3: Iteration: 2600 / 4000 [ 65%]  (Sampling)
+Chain 2: Iteration: 2600 / 4000 [ 65%]  (Sampling)
+Chain 4: Iteration: 3000 / 4000 [ 75%]  (Sampling)
+Chain 3: Iteration: 3000 / 4000 [ 75%]  (Sampling)
+Chain 1: Iteration: 2600 / 4000 [ 65%]  (Sampling)
+Chain 2: Iteration: 3000 / 4000 [ 75%]  (Sampling)
+Chain 4: Iteration: 3400 / 4000 [ 85%]  (Sampling)
+Chain 3: Iteration: 3400 / 4000 [ 85%]  (Sampling)
+Chain 1: Iteration: 3000 / 4000 [ 75%]  (Sampling)
+Chain 2: Iteration: 3400 / 4000 [ 85%]  (Sampling)
+Chain 3: Iteration: 3800 / 4000 [ 95%]  (Sampling)
+Chain 4: Iteration: 3800 / 4000 [ 95%]  (Sampling)
+Chain 1: Iteration: 3400 / 4000 [ 85%]  (Sampling)
+Chain 3: Iteration: 4000 / 4000 [100%]  (Sampling)
+Chain 3: 
+Chain 3:  Elapsed Time: 2505.97 seconds (Warm-up)
+Chain 3:                5750.25 seconds (Sampling)
+Chain 3:                8256.22 seconds (Total)
+Chain 3: 
+Chain 4: Iteration: 4000 / 4000 [100%]  (Sampling)
+Chain 4: 
+Chain 4:  Elapsed Time: 2435.09 seconds (Warm-up)
+Chain 4:                5830.32 seconds (Sampling)
+Chain 4:                8265.4 seconds (Total)
+Chain 4: 
+Chain 2: Iteration: 3800 / 4000 [ 95%]  (Sampling)
+Chain 1: Iteration: 3800 / 4000 [ 95%]  (Sampling)
+Chain 2: Iteration: 4000 / 4000 [100%]  (Sampling)
+Chain 2: 
+Chain 2:  Elapsed Time: 2857.64 seconds (Warm-up)
+Chain 2:                5757.11 seconds (Sampling)
+Chain 2:                8614.76 seconds (Total)
+Chain 2: 
+Chain 1: Iteration: 4000 / 4000 [100%]  (Sampling)
+Chain 1: 
+Chain 1:  Elapsed Time: 3178.41 seconds (Warm-up)
+Chain 1:                5534.4 seconds (Sampling)
+Chain 1:                8712.81 seconds (Total)
+Chain 1: 
+Warning messages:
+1: There were 213 divergent transitions after warmup. See
+https://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup
+to find out why this is a problem and how to eliminate them. 
+2: Examine the pairs() plot to diagnose sampling problems
+ 
+[2026-02-02 01:44:46]  Sampling complete. 
+[2026-02-02 01:44:46]  Generating summaries... 
+Error in check_pars(allpars, pars) : no parameter logit_mu_s0
+Calls: summary ... summary -> .local -> check_pars_second -> check_pars
+Execution halted
+srun: error: node100: task 0: Exited with exit code 1
+=== FAILED: Model bertrand (Job 43370910) exited with code 1 at Mon Feb  2 01:45:25 EST 2026 ===
