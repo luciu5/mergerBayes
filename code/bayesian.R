@@ -44,12 +44,12 @@ if (is.na(data_frac)) data_frac <- 1.0
 
 # Year Filter (Single "2014" or Range "2014-2016")
 filter_year_str <- as.character(args[7])
-if (is.na(filter_year_str) || filter_year_str == "NA") filter_year_str <- "0"
+if (is.na(filter_year_str) || filter_year_str == "NA") filter_year_str <- "2014-2015"
 
 if (grepl("-", filter_year_str)) {
   parts <- as.numeric(unlist(strsplit(filter_year_str, "-")))
-  start_year <- parts[1]
-  end_year <- parts[2]
+  start_year <- as.numeric(as.character(parts[1]))
+  end_year <- as.numeric(as.character(parts[2]))
 } else {
   start_year <- as.numeric(filter_year_str)
   end_year <- start_year
@@ -96,8 +96,8 @@ simdata <- simdata %>%
     tophold = factor(tophold),
     year = factor(year),
     shareIn = deposit_share,
-    margin = selected_margin / 100,
-    rate_deposits = rate_call_report / 100,
+    margin = selected_margin,
+    rate_deposits = rate_call_report,
     rate_loans = 0 # Proxy
   ) %>%
   mutate(margin = ifelse(margin <= 0, NA, margin)) %>%
@@ -130,7 +130,7 @@ simdata <- simdata %>%
   mutate(
     event_mkt = droplevels(event_mkt),
     tophold = droplevels(tophold),
-    year = droplevels(year)
+    year = as.numeric(as.character(droplevels(year)))
   )
 
 # ------------------------------------------------------------------------------
@@ -144,7 +144,7 @@ if (start_year > 0) {
     simdata <- simdata %>% filter(year == start_year)
   } else {
     log_msg(paste("Filtering for Year Range:", start_year, "-", end_year))
-    simdata <- simdata %>% filter(year >= start_year & year <= end_year)
+    simdata <- simdata %>% filter(year %in% start_year : end_year)
   }
 }
 
@@ -168,7 +168,7 @@ if (start_year > 0 || data_frac < 1.0) {
     mutate(
       event_mkt = droplevels(event_mkt),
       tophold = droplevels(tophold),
-      year = droplevels(year)
+      year = factor(year)
     )
 }
 
@@ -314,7 +314,7 @@ if (thismodel == 3) target_adapt_delta <- 0.99
 # If PNB mode, use higher adapt_delta
 if (is_single_market == 1) target_adapt_delta <- 0.99
 
-log_msg(paste("Starting sampling (7000 iter, thin=5) | adapt_delta:", target_adapt_delta))
+log_msg(paste("Starting sampling (4000 iter, thin=2) | adapt_delta:", target_adapt_delta))
 
 fit <- sampling(
   model,
