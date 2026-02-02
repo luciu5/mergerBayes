@@ -287,6 +287,7 @@ stan_data <- list(
   use_cutoff = 1L, # Default: Hybrid Model (Small=MonCom)
   use_hmt = as.integer(use_hmt_arg),
   fix_supply_intercept = 0L, # Default: Allow supply intercept
+  avg_price_hmt = avg_price_hmt,
   avg_margin_hmt = avg_margin_hmt,
   ssnip_hmt = ssnip_hmt,
   min_s0 = min_s0_vec, # Actual fringe share vector (aligned)
