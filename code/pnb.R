@@ -146,13 +146,13 @@ run_batch <- function(sdata, suffix) {
   cat(sprintf("\n\n>>> STARTING BATCH: %s <<<\n", ifelse(suffix == "", "Standard", "HMT Constrained")))
   results <- list()
 
-  for (m in 1:1) {
+  for (m in 1:4) {
     model_name <- models[m]
     cat(sprintf("\n=== RUNNING MODEL: %s (Suffix: %s) ===\n", model_name, suffix))
 
     sdata$supply_model <- as.integer(m)
 
-    adapt_delta <- 0.95 # Optimized for Speed + Stability (Conflict Resolved)
+    adapt_delta <- 0.99 # Increased back to 0.99 (0.95 caused 2000+ divs)
     # if (m == 3) adapt_delta <- 0.95
 
     fit <- sampling(
