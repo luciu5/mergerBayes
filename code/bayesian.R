@@ -56,7 +56,6 @@ if (grepl("-", filter_year_str)) {
 }
 
 
-
 # Set up Stan parallelization
 options(mc.cores = chain_count)
 rstan_options(auto_write = TRUE)
@@ -140,11 +139,11 @@ simdata <- simdata %>%
 # 1. Year Filter
 if (start_year > 0) {
   if (start_year == end_year) {
-      log_msg(paste("Filtering for Year:", start_year))
-      simdata <- simdata %>% filter(year == start_year)
+    log_msg(paste("Filtering for Year:", start_year))
+    simdata <- simdata %>% filter(year == start_year)
   } else {
-      log_msg(paste("Filtering for Year Range:", start_year, "-", end_year))
-      simdata <- simdata %>% filter(year >= start_year & year <= end_year)
+    log_msg(paste("Filtering for Year Range:", start_year, "-", end_year))
+    simdata <- simdata %>% filter(year >= start_year & year <= end_year)
   }
 }
 
@@ -154,24 +153,23 @@ if (data_frac < 1.0 && data_frac > 0) {
   log_msg(paste("Subsampling", data_frac * 100, "% of markets..."))
   all_markets <- levels(droplevels(simdata$event_mkt))
   n_keep <- max(5, round(length(all_markets) * data_frac))
-  
+
   set.seed(42) # Ensure reproducible subsamples
   keep_markets <- sample(all_markets, n_keep)
-  
+
   simdata <- simdata %>% filter(event_mkt %in% keep_markets)
   log_msg(paste("Reduced to", n_keep, "markets."))
 }
 
 if (start_year > 0 || data_frac < 1.0) {
-    # Re-level again after subsampling
-    simdata <- simdata %>%
-      mutate(
-        event_mkt = droplevels(event_mkt),
-        tophold = droplevels(tophold),
-        year = droplevels(year)
-      )
+  # Re-level again after subsampling
+  simdata <- simdata %>%
+    mutate(
+      event_mkt = droplevels(event_mkt),
+      tophold = droplevels(tophold),
+      year = droplevels(year)
+    )
 }
-
 
 
 # ------------------------------------------------------------------------------
@@ -189,6 +187,51 @@ if (is_single_market == 1) {
 }
 
 if (nrow(simdata) < 10) stop("Too few observations!")
+
+# ------------------------------------------------------------------------------
+# FRINGE HANDLING (Consistent with PNB/Stan Logic)
+# ------------------------------------------------------------------------------
+# Define Fringe: Firms with < 1.0% share
+FRANGE_THRESH <- 0.01
+
+# 1. Calculate Fringe Share per Market (to pass as min_s0)
+# Step 1: Sum fringe share per market-year
+# Step 2: Average across years to get a single stable prior anchor per market
+fringe_summary <- simdata %>%
+  group_by(event_mkt, year) %>%
+  summarise(
+    yr_fringe = sum(shareIn[shareIn < FRANGE_THRESH], na.rm = TRUE),
+    .groups = "drop_last"
+  ) %>%
+  summarise(
+    fringe_share = mean(yr_fringe, na.rm = TRUE), # Average over years
+    .groups = "drop"
+  ) %>%
+  complete(event_mkt, fill = list(fringe_share = 0)) %>%
+  arrange(event_mkt)
+
+min_s0_vec <- fringe_summary$fringe_share
+
+# 2. Filter & Rescale Data
+# 2. Filter & Rescale Data
+log_msg(paste("Removing firms with share <", FRANGE_THRESH * 100, "%"))
+simdata <- simdata %>%
+  filter(shareIn >= FRANGE_THRESH) %>%
+  # group_by(event_mkt, year) %>% # RESCALING DISABLED (Hard Floor Logic)
+  # mutate(shareIn = shareIn / sum(shareIn)) %>%
+  # ungroup() %>%
+  droplevels() # Important: Re-level to ensure indexing matches
+
+# Re-align min_s0 vector to new filtered levels if any markets dropped (unlikely but safe)
+# The levels(simdata$event_mkt) might have changed if a market was purely fringe (invalid)
+if (nlevels(simdata$event_mkt) != length(min_s0_vec)) {
+  # Re-match
+  current_levels <- levels(simdata$event_mkt)
+  min_s0_vec <- fringe_summary %>%
+    filter(event_mkt %in% current_levels) %>%
+    arrange(factor(event_mkt, levels = current_levels)) %>%
+    pull(fringe_share)
+}
 
 # ------------------------------------------------------------------------------
 # PREPARE HMT INPUTS
@@ -221,8 +264,7 @@ stan_data <- list(
   shareIn = simdata$shareIn,
   marginInv = 1 / simdata$margin,
   rateDiff = as.numeric(scale(simdata$rate_deposits, center = TRUE, scale = TRUE)),
-  rateDiff = as.numeric(scale(simdata$rate_deposits, center = TRUE, scale = TRUE)),
-  # REMOVED loan_rate
+
 
   # --- Indexing ---
   N_event = nlevels(simdata$event_mkt),
@@ -245,14 +287,15 @@ stan_data <- list(
   use_cutoff = 1L, # Default: Hybrid Model (Small=MonCom)
   use_hmt = as.integer(use_hmt_arg),
   fix_supply_intercept = 0L, # Default: Allow supply intercept
-  avg_price_hmt = avg_price_hmt,
   avg_margin_hmt = avg_margin_hmt,
   ssnip_hmt = ssnip_hmt,
-  
-  prior_sigma_share = sd(log(simdata$shareIn), na.rm = TRUE),
-  prior_sigma_margin = sd(1 / simdata$margin, na.rm = TRUE),
-  prior_sigma_meanval_strat = 0.5, # Standard for Panel Strategic
-  prior_sigma_meanval_fringe = 0.2 # Tight for Panel Fringe
+  min_s0 = min_s0_vec, # Actual fringe share vector (aligned)
+
+  # --- PRIOR SCALES (Panel - Moderate Tolerance) ---
+  prior_sigma_share = 0.25, # Relaxed to 0.25 (match PNB)
+  prior_sigma_margin = 0.25 * mean(1 / simdata$margin, na.rm = TRUE), # 25% margin tolerance
+  prior_sigma_meanval_strat = 1.5, # Increased to 1.5 to absorb variation from removed assets
+  prior_sigma_meanval_fringe = 0.3 # Slightly looser (heterogeneous small banks)
 )
 
 # Export for Debugging
@@ -275,9 +318,9 @@ fit <- sampling(
   model,
   data = stan_data,
   chains = chain_count,
-  iter = 7000,
-  warmup = 1500,
-  thin = 5,
+  iter = 4000,
+  warmup = 1000,
+  thin = 2,
   control = list(adapt_delta = target_adapt_delta, max_treedepth = 13)
 )
 log_msg("Sampling complete.")
@@ -288,7 +331,7 @@ log_msg("Sampling complete.")
 log_msg("Generating summaries...")
 
 # Adjust parameters to extract based on single market vs panel
-base_pars <- c("a_event", "logit_mu_s0", "s0", "Rescor", "sigma_logshare", "sigma_margin", "gamma_loan")
+base_pars <- c("a_event", "logit_mu_s0", "s0", "Rescor", "sigma_logshare", "sigma_margin")
 # In single market mode, we care about the hyper-means mostly
 if (is_single_market == 1) {
   # We might want to look at mu_log_a directly
@@ -337,12 +380,12 @@ bridge <- tryCatch(
     log_msg("Attempting Bridge Sampler (Warp3)...")
     tryCatch(
       {
-         # Second attempt: Warp3 method (slower but robust)
-         bridge_sampler(fit, silent = FALSE, cores = thread_count, maxiter = 5000, method = "warp3")
-      }, 
+        # Second attempt: Warp3 method (slower but robust)
+        bridge_sampler(fit, silent = FALSE, cores = thread_count, maxiter = 5000, method = "warp3")
+      },
       error = function(e2) {
-         log_msg("Bridge (Warp3) Failed:", e2$message)
-         return(NULL)
+        log_msg("Bridge (Warp3) Failed:", e2$message)
+        return(NULL)
       }
     )
   }

@@ -16,7 +16,7 @@ functions {
                         int start, int end,
                         // --- DATA ---
                         vector logshareIn, vector marginInv, 
-                        vector shareIn, vector rateDiff, 
+                        vector shareIn, vector rateDiff,
                         array[] int event, array[] int tophold, array[] int year,
                         // --- PARAMETERS ---
                         vector a_event, vector b_event, 
@@ -134,6 +134,8 @@ data {
   real<lower=0> prior_sigma_margin;
   real<lower=0> prior_sigma_meanval_strat; // Renamed
   real<lower=0> prior_sigma_meanval_fringe; // Added
+  
+  vector<lower=0, upper=1>[N_event] min_s0; // Added: Fringe share lower bound
 }
 
 transformed data {
@@ -162,6 +164,7 @@ parameters {
   real mu_b_fringe;
   real<lower=0> sigma_b_fringe;
   
+  
   real mu_log_a;
   real<lower=0> sigma_log_a;
   vector[N_event] r_event_a_raw;
@@ -170,14 +173,11 @@ parameters {
   // Conditional: Only estimate if NOT fixed to 0
   vector[N_supply_int] mu_year_supply_raw;
   
-
   real<lower=0> sigma_year_supply;
   vector[N_year] year_raw_supply;
   
-  real<lower=-6.9, upper=4.6> logit_mu_s0;
-  real<lower=0> tau_s0;
-  real beta_deposits;
-  vector[N_event] s0_raw;
+  // S0: Hard Floor Offset (Positive Constraint)
+  vector<lower=0>[N_event] s0_offset; 
   
   vector<lower=0, upper=1>[N_cutoff] cutoff_share;
 
@@ -207,7 +207,13 @@ transformed parameters {
      b_event = mu_b_event + sigma_b_event * b_event_raw;
   }
   
-  vector[N_event] s0 = logit_mu_s0 + beta_deposits * log_deposits + tau_s0 * s0_raw;
+  // HARD FLOOR CONSTRAINT:
+  // s0 is the logit of the outside share.
+  // We enforce s0 > logit(fringe_share) by adding a positive offset.
+  vector[N_event] s0;
+  for (e in 1:N_event) {
+     s0[e] = logit(fmax(min_s0[e], 0.001)) + s0_offset[e];
+  }
 }
 
 model {
@@ -247,16 +253,19 @@ model {
     mu_year_supply_raw ~ std_normal();
   } 
 
-  logit_mu_s0 ~ normal(-0.7, 1.0); 
-  tau_s0 ~ normal(0, 0.5); s0_raw ~ std_normal();
-  beta_deposits ~ normal(0, 0.5); 
+  // S0 Offset Prior (Half-Normal)
+  // Strict concentration at 0 (Floor), allowing growth if needed.
+  s0_offset ~ normal(0, 0.5); 
 
+  // REMOVED GHOSTS (logit_mu_s0, tau_s0, beta_deposits)
+ 
+  
   if (use_hmt == 1) {
      real alpha_check = exp(mu_log_a) / rateDiff_sd; 
-     real s0_check = inv_logit(logit_mu_s0);
+     real s0_check = mean(inv_logit(s0));
      real agg_elasticity = abs(alpha_check * avg_price_hmt * s0_check);
      real max_elasticity = 1.0 / (ssnip_hmt + avg_margin_hmt);
-     target += soft_hmt_penalty(agg_elasticity, max_elasticity, 0.01);
+     target += soft_hmt_penalty(agg_elasticity, max_elasticity, 0.1);
   }
   
   if (use_cutoff == 1) cutoff_share ~ beta(3, 100);
@@ -268,7 +277,7 @@ model {
   target += reduce_sum(
     partial_sum_fast,
     seq, grainsize,
-    logshareIn, marginInv, shareIn, rateDiff, 
+    logshareIn, marginInv, shareIn, rateDiff,
     event, tophold, year,
     a_event, b_event, 
     b_tophold_raw, mu_b_strat, sigma_b_strat, mu_b_fringe, sigma_b_fringe,
