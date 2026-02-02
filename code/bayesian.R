@@ -84,7 +84,8 @@ load(file = file.path(datadir, "banksimdata.RData"))
 # Filter for 2014-2015 (Standard Panel Filter)
 # NOTE: If running PNB, you might want to adjust this filter manually or add logic.
 # For now, we assume simdata contains the relevant observations.
-simdata <- simdata %>% filter(year >= 2014 & year <= 2015)
+# Filter using command line arguments
+simdata <- simdata %>% filter(year >= start_year & year <= end_year)
 log_msg(paste("Data filtered. Rows:", nrow(simdata)))
 
 # Clean and process data
@@ -293,8 +294,8 @@ stan_data <- list(
   min_s0 = min_s0_vec, # Actual fringe share vector (aligned)
 
   # --- PRIOR SCALES (Panel - Moderate Tolerance) ---
-  prior_sigma_share = 0.25, # Relaxed to 0.25 (match PNB)
-  prior_sigma_margin = 0.25 * mean(1 / simdata$margin, na.rm = TRUE), # 25% margin tolerance
+  prior_sigma_share = 0.10, # Tightened to 0.10 (Trust Shares)
+  prior_sigma_margin = 1.0 * mean(1 / simdata$margin, na.rm = TRUE), # Loose (1.0) Margin Tolerance
   prior_sigma_meanval_strat = 1.5, # Increased to 1.5 to absorb variation from removed assets
   prior_sigma_meanval_fringe = 0.3 # Slightly looser (heterogeneous small banks)
 )
