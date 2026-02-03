@@ -144,7 +144,7 @@ if (start_year > 0) {
     simdata <- simdata %>% filter(year == start_year)
   } else {
     log_msg(paste("Filtering for Year Range:", start_year, "-", end_year))
-    simdata <- simdata %>% filter(year %in% start_year : end_year)
+    simdata <- simdata %>% filter(year %in% start_year:end_year)
   }
 }
 
@@ -309,10 +309,10 @@ log_msg("Data preparation complete. Compiling model...")
 model <- stan_model(modelpath)
 
 # Sampling
-target_adapt_delta <- 0.95
-if (thismodel == 3) target_adapt_delta <- 0.99
+target_adapt_delta <- 0.99
+# if (thismodel == 3) target_adapt_delta <- 0.99
 # If PNB mode, use higher adapt_delta
-if (is_single_market == 1) target_adapt_delta <- 0.99
+# if (is_single_market == 1) target_adapt_delta <- 0.99
 
 log_msg(paste("Starting sampling (4000 iter, thin=2) | adapt_delta:", target_adapt_delta))
 
@@ -333,7 +333,7 @@ log_msg("Sampling complete.")
 log_msg("Generating summaries...")
 
 # Adjust parameters to extract based on single market vs panel
-base_pars <- c("a_event", "logit_mu_s0", "s0", "Rescor", "sigma_logshare", "sigma_margin")
+base_pars <- c("a_event", "s0", "Rescor", "sigma_logshare", "sigma_margin")
 # In single market mode, we care about the hyper-means mostly
 if (is_single_market == 1) {
   # We might want to look at mu_log_a directly

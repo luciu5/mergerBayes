@@ -190,7 +190,10 @@ transformed parameters {
   corr_matrix[2] Corr;
   real rho;                
   Corr = multiply_lower_tri_self_transpose(Lrescor);
-  rho = Corr[1,2];
+  
+  // FIX: For single market, force rho to 0 to prevent identification issues
+  // The Lrescor parameter remains but is detached from the likelihood
+  rho = (is_single_market == 1) ? 0.0 : Corr[1,2];
 
   vector[N_year] year_effect_demand = mu_year_demand + sigma_year_demand * year_raw_demand;
   
@@ -254,8 +257,9 @@ model {
   } 
 
   // S0 Offset Prior (Half-Normal)
-  // Strict concentration at 0 (Floor), allowing growth if needed.
-  s0_offset ~ normal(0, 0.5); 
+  // Relaxed to allow outside share to be significantly larger than fringe share
+  // (e.g. if fringe=5% (logit -3) but outside=30% (logit -1), need offset +2)
+  s0_offset ~ normal(0, 2.0); 
 
   // REMOVED GHOSTS (logit_mu_s0, tau_s0, beta_deposits)
  
@@ -290,7 +294,7 @@ model {
 
 generated quantities {
   corr_matrix[2] Rescor = multiply_lower_tri_self_transpose(Lrescor);
-  real rho_gen = Rescor[1, 2];
+  real rho_gen = rho; // Use the effective rho (0 if single market)
   
   vector[N] log_lik;
   vector[N] pred_logshareIn;

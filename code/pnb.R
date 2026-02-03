@@ -10,8 +10,8 @@ library(loo)
 library(readr)
 
 # --- CONFIGURATION ---
-ITER <- 2000
-WARMUP <- 1000
+ITER <- 600
+WARMUP <- 400
 CHAINS <- 4
 CORES <- 4
 SEED <- 1960 # Data year
@@ -20,7 +20,7 @@ SEED <- 1960 # Data year
 directory <- "d:/Projects/mergerBayes"
 datadir <- file.path(directory, "data")
 resultsdir <- file.path(directory, "results")
-modelpath <- file.path(directory, "code", "bayesian.stan")
+modelpath <- file.path(directory, "code", "bayesian_pnb.stan")
 datafile <- file.path(datadir, "pnb_case_data.csv")
 
 # Ensure output dir exists
@@ -47,7 +47,7 @@ cat("After initial filtering:", nrow(simdata), "observations\n")
 
 # --- FRINGE SHARE ADJUSTMENT ---
 # Remove firms < 1% share and add their total share to the lower bound of Outside Option
-FRANGE_THRESH <- 0.01
+FRANGE_THRESH <- 0.0 # Keep all for Cutoff Analysis
 
 # Calculate fringe share per market
 fringe_shares <- simdata %>%
@@ -95,7 +95,7 @@ bank_assets <- simdata$total_assets
 
 # Stan Data Preparation (Template)
 sdata_template <- list(
-  use_cutoff = 0L, # DISABLED: Vanilla model (no Split Prior)
+  use_cutoff = 1L, # ENABLED: Testing Cutoff Search
   N = nrow(simdata),
   shareIn = simdata$shareIn,
   marginInv = simdata$marginInv,
@@ -128,8 +128,8 @@ sdata_template <- list(
   ssnip_hmt = 0.05,
 
   # --- PRIOR SCALES ---
-  # TEST: Tight Share (Hard Data) vs Relaxed Margin (Soft Data)
-  prior_sigma_share = 0.10,
+  # TEST: Absolute Share Tolerance (0.5%) vs Relaxed Margin (Soft Data)
+  prior_sigma_share = 0.005, # Absolute 0.5%
   prior_sigma_margin = 1.0, # Multiplier for margin prior (Very loose)
   prior_sigma_meanval_strat = 1.5,
   prior_sigma_meanval_fringe = 0.2
@@ -146,13 +146,13 @@ run_batch <- function(sdata, suffix) {
   cat(sprintf("\n\n>>> STARTING BATCH: %s <<<\n", ifelse(suffix == "", "Standard", "HMT Constrained")))
   results <- list()
 
-  for (m in 1:4) {
+  for (m in 1:length(models)) {
     model_name <- models[m]
     cat(sprintf("\n=== RUNNING MODEL: %s (Suffix: %s) ===\n", model_name, suffix))
 
     sdata$supply_model <- as.integer(m)
 
-    adapt_delta <- 0.99 # Increased back to 0.99 (0.95 caused 2000+ divs)
+    adapt_delta <- 0.99 # Increased for decoupled stability
     # if (m == 3) adapt_delta <- 0.95
 
     fit <- sampling(
@@ -197,12 +197,13 @@ run_batch <- function(sdata, suffix) {
     p_alpha_sd <- sd(post$a_event)
     p_s0_mean <- mean(plogis(post$s0))
     p_s0_sd <- sd(plogis(post$s0)) # Probability Scale
-    p_rho_mean <- mean(post$rho_gen)
-    p_rho_sd <- sd(post$rho_gen)
+
+    # Decoupled Params
     p_sigmam_mean <- mean(post$sigma_margin)
     p_sigmam_sd <- sd(post$sigma_margin)
-    p_sigmas_mean <- mean(post$sigma_logshare)
-    p_sigmas_sd <- sd(post$sigma_logshare)
+    p_sigmas_mean <- mean(post$sigma_share_abs) # Changed from sigma_logshare
+    p_sigmas_sd <- sd(post$sigma_share_abs)
+
     p_cutoff_mean <- mean(post$cutoff_share)
     p_cutoff_sd <- sd(post$cutoff_share)
 
@@ -214,12 +215,12 @@ run_batch <- function(sdata, suffix) {
 
     results[[model_name]] <- list(
       Model = model_name, Divergences = divs, LogML = logml, LOOIC = looic,
-      Alpha = p_alpha_mean, S0 = p_s0_mean, Rho = p_rho_mean,
+      Alpha = p_alpha_mean, S0 = p_s0_mean,
       RMSE_Share = rmse_share, RMSE_Margin = rmse_margin,
       details = data.frame(
-        Parameter = c("Alpha", "S0", "Sigma_Share", "Sigma_Margin", "Rho", "Cutoff"),
-        Mean = c(p_alpha_mean, p_s0_mean, p_sigmas_mean, p_sigmam_mean, p_rho_mean, p_cutoff_mean),
-        SD = c(p_alpha_sd, p_s0_sd, p_sigmas_sd, p_sigmam_sd, p_rho_sd, p_cutoff_sd)
+        Parameter = c("Alpha", "S0", "Sigma_Share_Abs", "Sigma_Margin", "Cutoff"),
+        Mean = c(p_alpha_mean, p_s0_mean, p_sigmas_mean, p_sigmam_mean, p_cutoff_mean),
+        SD = c(p_alpha_sd, p_s0_sd, p_sigmas_sd, p_sigmam_sd, p_cutoff_sd)
       )
     )
   }
@@ -227,11 +228,13 @@ run_batch <- function(sdata, suffix) {
   # --- SUMMARY TABLES ---
   df_res <- bind_rows(lapply(results, function(x) x[names(x) != "details"]))
   max_logml <- max(df_res$LogML, na.rm = TRUE)
+  if (is.infinite(max_logml)) max_logml <- -1e10 # Fallback
+
   df_res <- df_res %>%
     mutate(
-      diff_logml = LogML - max_logml,
-      bayes_factor_vs_best = exp(diff_logml),
-      posterior_prob = exp(diff_logml) / sum(exp(diff_logml), na.rm = TRUE)
+      diff_logml = ifelse(is.na(LogML), NA, LogML - max_logml),
+      bayes_factor_vs_best = ifelse(is.na(diff_logml), NA, exp(diff_logml)),
+      posterior_prob = ifelse(is.na(diff_logml), 0, exp(diff_logml) / sum(exp(diff_logml), na.rm = TRUE))
     ) %>%
     arrange(desc(LogML))
 
@@ -240,17 +243,27 @@ run_batch <- function(sdata, suffix) {
 
   # Parameter Table
   priors <- data.frame(
-    Parameter = c("Alpha", "S0", "Sigma_Share", "Sigma_Margin", "Rho", "Cutoff"),
-    Prior_Desc = c("LogNorm(0,0.5)", "Logit(-0.7,1)", sprintf("Normal(0, %.2f)", sd_logshare), sprintf("Normal(0, %.2f)", sd_marginInv), "LKJ(4)", "Beta(3,100)"),
-    Prior_Mean = c("1.13", "0.33", "0.00", "0.00", "0.00", "0.03"),
-    Prior_SD = c("0.60", "0.20", sprintf("%.2f", sd_logshare), sprintf("%.2f", sd_marginInv), "0.25", "0.02")
+    Parameter = c("Alpha", "S0", "Sigma_Share_Abs", "Sigma_Margin", "Cutoff"),
+    Prior_Desc = c("LogNorm(0,0.5)", "Logit(-0.7,1)", "Normal(0, 0.005)", sprintf("Normal(0, %.2f)", sd_marginInv), "Beta(3,100)"),
+    Prior_Mean = c("1.13", "0.33", "0.00", "0.00", "0.03"),
+    Prior_SD = c("0.60", "0.20", "0.005", sprintf("%.2f", sd_marginInv), "0.02")
   )
   priors$Prior_Col <- paste0(priors$Prior_Mean, " (", priors$Prior_SD, ")")
   param_table <- priors %>% select(Parameter, Prior = Prior_Col)
 
-  for (m in models) {
+  # Dynamically process only the models that were actually run
+  run_models <- intersect(models, names(results))
+
+  for (m in run_models) {
     det <- results[[m]]$details
-    param_table <- left_join(param_table, det %>% mutate(Formatted = sprintf("%.3f (%.3f)", Mean, SD)) %>% select(Parameter, !!m := Formatted), by = "Parameter")
+    if (!is.null(det)) {
+      # Rename 'Formatted' column to the model name
+      det_col <- det %>%
+        mutate(!!m := sprintf("%.3f (%.3f)", Mean, SD)) %>%
+        select(Parameter, !!m)
+
+      param_table <- left_join(param_table, det_col, by = "Parameter")
+    }
   }
 
   outfile_param <- file.path(resultsdir, paste0("pnb_parameter_comparison", suffix, ".csv"))
