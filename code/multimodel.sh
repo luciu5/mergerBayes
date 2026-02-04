@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=BayesSupplyArray
-#SBATCH --cpus-per-task=32     # 4 chains * 8 threads = 32 CPUs
+#SBATCH --cpus-per-task=16     # 4 chains * 4 threads = 16 CPUs
 #SBATCH --mem=64G              # Increased memory from 16G to 64G for stability
 #SBATCH --time=48:00:00        # Added 48 hour time limit to prevent premature termination
 #SBATCH --output=logs/model_%a_%j.log   # Combined stdout+stderr to single log
@@ -13,7 +13,7 @@ MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
 
 # Set number of chains and threads per chain
 export STAN_NUM_CHAINS=4      
-export STAN_NUM_THREADS=8     
+export STAN_NUM_THREADS=4     
 
 # Avoid thread oversubscription by BLAS/OpenMP
 export OMP_NUM_THREADS=1

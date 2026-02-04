@@ -281,7 +281,7 @@ stan_data <- list(
   log_deposits = as.numeric(scale(log(eventdata$deposit_total_market))),
   # REMOVED log_assets
   rateDiff_sd = sd(simdata$rate_deposits, na.rm = TRUE),
-  grainsize = max(1, round(nrow(simdata) / (10 * thread_count))),
+  grainsize = max(100, round(nrow(simdata) / (4 * chain_count))),
 
   # --- NEW FLAGS (PNB / HMT) ---
   is_single_market = as.integer(is_single_market),
