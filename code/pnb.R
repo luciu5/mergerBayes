@@ -10,8 +10,8 @@ library(loo)
 library(readr)
 
 # --- CONFIGURATION ---
-ITER <- 600
-WARMUP <- 400
+ITER <- 2000
+WARMUP <- 1000
 CHAINS <- 4
 CORES <- 4
 SEED <- 1960 # Data year
@@ -95,7 +95,7 @@ bank_assets <- simdata$total_assets
 
 # Stan Data Preparation (Template)
 sdata_template <- list(
-  use_cutoff = 1L, # ENABLED: Testing Cutoff Search
+  use_cutoff = 0L, # DISABLED: Single Conduct Mode
   N = nrow(simdata),
   shareIn = simdata$shareIn,
   marginInv = simdata$marginInv,
@@ -139,11 +139,11 @@ sdata_template <- list(
 cat("Compiling Stan Model...\n")
 stan_mod <- stan_model(modelpath)
 
-models <- c("Bertrand", "Auction", "Cournot", "MonCom")
+models <- c("Bertrand")
 
 # --- BATCH EXECUTION FUNCTION ---
 run_batch <- function(sdata, suffix) {
-  cat(sprintf("\n\n>>> STARTING BATCH: %s <<<\n", ifelse(suffix == "", "Standard", "HMT Constrained")))
+  cat(sprintf("\n\n>>> STARTING BATCH: %s <<<\n", ifelse(suffix == "_tight", "Tight Prior (Full)", ifelse(suffix == "", "Standard", "HMT Constrained"))))
   results <- list()
 
   for (m in 1:length(models)) {
@@ -201,11 +201,11 @@ run_batch <- function(sdata, suffix) {
     # Decoupled Params
     p_sigmam_mean <- mean(post$sigma_margin)
     p_sigmam_sd <- sd(post$sigma_margin)
-    p_sigmas_mean <- mean(post$sigma_share_abs) # Changed from sigma_logshare
+    p_sigmas_mean <- mean(post$sigma_share_abs)
     p_sigmas_sd <- sd(post$sigma_share_abs)
 
-    p_cutoff_mean <- mean(post$cutoff_share)
-    p_cutoff_sd <- sd(post$cutoff_share)
+    p_rho_mean <- mean(post$rho)
+    p_rho_sd <- sd(post$rho)
 
     # Validation
     y1_pred <- colMeans(post$pred_logshareIn)
@@ -218,9 +218,9 @@ run_batch <- function(sdata, suffix) {
       Alpha = p_alpha_mean, S0 = p_s0_mean,
       RMSE_Share = rmse_share, RMSE_Margin = rmse_margin,
       details = data.frame(
-        Parameter = c("Alpha", "S0", "Sigma_Share_Abs", "Sigma_Margin", "Cutoff"),
-        Mean = c(p_alpha_mean, p_s0_mean, p_sigmas_mean, p_sigmam_mean, p_cutoff_mean),
-        SD = c(p_alpha_sd, p_s0_sd, p_sigmas_sd, p_sigmam_sd, p_cutoff_sd)
+        Parameter = c("Alpha", "S0", "Sigma_Share_Abs", "Sigma_Margin"),
+        Mean = c(p_alpha_mean, p_s0_mean, p_sigmas_mean, p_sigmam_mean),
+        SD = c(p_alpha_sd, p_s0_sd, p_sigmas_sd, p_sigmam_sd)
       )
     )
   }
@@ -243,10 +243,10 @@ run_batch <- function(sdata, suffix) {
 
   # Parameter Table
   priors <- data.frame(
-    Parameter = c("Alpha", "S0", "Sigma_Share_Abs", "Sigma_Margin", "Cutoff"),
-    Prior_Desc = c("LogNorm(0,0.5)", "Logit(-0.7,1)", "Normal(0, 0.005)", sprintf("Normal(0, %.2f)", sd_marginInv), "Beta(3,100)"),
-    Prior_Mean = c("1.13", "0.33", "0.00", "0.00", "0.03"),
-    Prior_SD = c("0.60", "0.20", "0.005", sprintf("%.2f", sd_marginInv), "0.02")
+    Parameter = c("Alpha", "S0", "Sigma_Share_Abs", "Sigma_Margin"),
+    Prior_Desc = c("LogNorm(0,0.5)", "Logit(-0.7,1)", "Normal(0, 0.005)", sprintf("Normal(0, %.2f)", sd_marginInv)),
+    Prior_Mean = c("1.13", "0.33", "0.00", "0.00"),
+    Prior_SD = c("0.60", "0.20", "0.005", sprintf("%.2f", sd_marginInv))
   )
   priors$Prior_Col <- paste0(priors$Prior_Mean, " (", priors$Prior_SD, ")")
   param_table <- priors %>% select(Parameter, Prior = Prior_Col)

@@ -294,7 +294,7 @@ stan_data <- list(
   min_s0 = min_s0_vec, # Actual fringe share vector (aligned)
 
   # --- PRIOR SCALES (Panel - Moderate Tolerance) ---
-  prior_sigma_share = 0.10, # Tightened to 0.10 (Trust Shares)
+  prior_sigma_share = 0.005, # Absolute (0.5% share tolerance)
   prior_sigma_margin = 1.0 * mean(1 / simdata$margin, na.rm = TRUE), # Loose (1.0) Margin Tolerance
   prior_sigma_meanval_strat = 1.5, # Increased to 1.5 to absorb variation from removed assets
   prior_sigma_meanval_fringe = 0.3 # Slightly looser (heterogeneous small banks)
@@ -333,7 +333,7 @@ log_msg("Sampling complete.")
 log_msg("Generating summaries...")
 
 # Adjust parameters to extract based on single market vs panel
-base_pars <- c("a_event", "s0", "Rescor", "sigma_logshare", "sigma_margin")
+base_pars <- c("a_event", "s0", "Rescor", "sigma_share_abs", "sigma_margin")
 # In single market mode, we care about the hyper-means mostly
 if (is_single_market == 1) {
   # We might want to look at mu_log_a directly
