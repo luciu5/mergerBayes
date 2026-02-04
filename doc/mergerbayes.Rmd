@@ -181,7 +181,7 @@ The results below show the comparison. Note that while **Monopolistic Competitio
 
 ```{r pnb_results, echo=FALSE, message=FALSE, warning=FALSE}
 # Load Model Results
-pnb_res <- read_csv("../results/pnb_model_results.csv", show_col_types = FALSE) %>%
+pnb_res <- read_csv("../results/pnb_model_results_tight.csv", show_col_types = FALSE) %>%
   mutate(bayes_factor_vs_best = tryCatch(exp(LogML - max(LogML, na.rm = TRUE)), error = function(e) NA)) %>%
   select(Model, LogML, LOOIC, RMSE_Share, Alpha) %>%
   rename("RMSE" = RMSE_Share)
@@ -198,7 +198,7 @@ A key advantage of our framework is that it estimates structural parameters simu
 
 ```{r pnb_params, echo=FALSE, message=FALSE, warning=FALSE}
 # Load Parameter Comparison
-pnb_params <- read_csv("../results/pnb_parameter_comparison.csv", show_col_types = FALSE)
+pnb_params <- read_csv("../results/pnb_parameter_comparison_tight.csv", show_col_types = FALSE)
 
 kable(pnb_params, caption = "Parameter Estimates (Mean and SD) vs Priors") %>%
   kable_styling(latex_options = c("striped", "hold_position"), font_size = 10)

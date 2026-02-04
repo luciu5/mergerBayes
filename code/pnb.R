@@ -10,8 +10,8 @@ library(loo)
 library(readr)
 
 # --- CONFIGURATION ---
-ITER <- 600
-WARMUP <- 400
+ITER <- 2000
+WARMUP <- 1000
 CHAINS <- 4
 CORES <- 4
 SEED <- 1960 # Data year
