@@ -15,7 +15,7 @@ functions {
   real partial_sum_fast(array[] int slice_idx,
                         int start, int end,
                         // --- DATA ---
-                        vector logshareIn, vector marginInv, 
+                        vector marginInv, 
                         vector shareIn, vector rateDiff,
                         array[] int event, array[] int tophold, array[] int year,
                         // --- PARAMETERS ---
@@ -28,14 +28,14 @@ functions {
                         vector s0, vector year_effect_demand, vector year_effect_supply,
                         vector cutoff_share, 
                         // --- SCALARS ---
-                        real sigma_logshare, real sigma_margin, real rho,
+                        real sigma_share_abs, real sigma_margin, real rho,
                         real rateDiff_sd,
                         int supply_model, int use_cutoff) {
     
     real lp = 0;
     int N_slice = end - start + 1;
     real sigma_cond = sigma_margin * sqrt(1.0 - square(rho));
-    real slope_cond = rho * (sigma_margin / sigma_logshare);
+    real slope_cond = rho * (sigma_margin / sigma_share_abs);
     // SMOOTHING: Increased k from 0.05 to 0.2 to help Bridge Sampling navigate the switch
     real k = 0.2; 
     
@@ -91,12 +91,18 @@ functions {
       real mu2 = inv_markup + year_effect_supply[year[i]];
 
       // --- C. ACCUMULATE ---
-      real y1 = logshareIn[i];
-      real y2 = marginInv[i]; 
-      real mu2_cond = mu2 + slope_cond * (y1 - mu1);
+      // 1. Calculate Expected Share
+      real pred_share = exp(mu1);
       
-      lp += normal_lpdf(y1 | mu1, sigma_logshare);
-      lp += normal_lpdf(y2 | mu2_cond, sigma_cond);
+      // 2. Share Error
+      real err_share = shareIn[i] - pred_share;
+      
+      // 3. Conditional Mean for Margin
+      real mu2_cond = mu2 + slope_cond * err_share;
+      
+      // 4. LPDF Accumulation
+      lp += normal_lpdf(shareIn[i] | pred_share, sigma_share_abs); 
+      lp += normal_lpdf(marginInv[i] | mu2_cond, sigma_cond);
     }
     return lp;
   }
@@ -182,7 +188,7 @@ parameters {
   vector<lower=0, upper=1>[N_cutoff] cutoff_share;
 
   cholesky_factor_corr[2] Lrescor; 
-  real<lower=0> sigma_logshare;    
+  real<lower=0> sigma_share_abs;    
   real<lower=0> sigma_margin;      
 }
 
@@ -275,18 +281,18 @@ model {
   if (use_cutoff == 1) cutoff_share ~ beta(3, 100);
   
   Lrescor ~ lkj_corr_cholesky(2.0); 
-  sigma_logshare ~ normal(0, prior_sigma_share);
+  sigma_share_abs ~ normal(0, prior_sigma_share);
   sigma_margin ~ normal(0, prior_sigma_margin); 
 
   target += reduce_sum(
     partial_sum_fast,
     seq, grainsize,
-    logshareIn, marginInv, shareIn, rateDiff,
+    marginInv, shareIn, rateDiff,
     event, tophold, year,
     a_event, b_event, 
     b_tophold_raw, mu_b_strat, sigma_b_strat, mu_b_fringe, sigma_b_fringe,
     s0, year_effect_demand, year_effect_supply, cutoff_share, 
-    sigma_logshare, sigma_margin, rho,
+    sigma_share_abs, sigma_margin, rho,
     rateDiff_sd,
     supply_model, use_cutoff
   );
@@ -297,12 +303,12 @@ generated quantities {
   real rho_gen = rho; // Use the effective rho (0 if single market)
   
   vector[N] log_lik;
-  vector[N] pred_logshareIn;
+  vector[N] pred_shareIn;
   vector[N] pred_marginInv;
   
   {
      real sigma_cond = sigma_margin * sqrt(1.0 - square(rho));
-     real slope_cond = rho * (sigma_margin / sigma_logshare);
+     real slope_cond = rho * (sigma_margin / sigma_share_abs);
      // SMOOTHING: Increased k from 0.05 to 0.2 to help Bridge Sampling navigate the switch
      real k = 0.2; 
 
@@ -347,12 +353,15 @@ generated quantities {
        
        real mu2 = inv_markup + year_effect_supply[year[n]];
        
-       pred_logshareIn[n] = mu1;
+       // Calculate Expected Share
+       real pred_share = exp(mu1);
+       pred_shareIn[n] = pred_share;
        pred_marginInv[n] = mu2;
        
-       real mu2_cond = mu2 + slope_cond * (logshareIn[n] - mu1);
+       real err_share = shareIn[n] - pred_share;
+       real mu2_cond = mu2 + slope_cond * err_share;
        
-       log_lik[n] = normal_lpdf(logshareIn[n] | mu1, sigma_logshare) + 
+       log_lik[n] = normal_lpdf(shareIn[n] | pred_share, sigma_share_abs) + 
                     normal_lpdf(marginInv[n] | mu2_cond, sigma_cond);
      }
   }
