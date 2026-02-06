@@ -142,6 +142,7 @@ data {
   real<lower=0> prior_sigma_meanval_fringe; // Added
   
   vector<lower=0, upper=1>[N_event] min_s0; // Added: Fringe share lower bound
+  real<lower=0> prior_lkj; // Added: LKJ Prior Shape
 }
 
 transformed data {
@@ -280,7 +281,7 @@ model {
   
   if (use_cutoff == 1) cutoff_share ~ beta(3, 100);
   
-  Lrescor ~ lkj_corr_cholesky(2.0); 
+  Lrescor ~ lkj_corr_cholesky(prior_lkj); 
   sigma_share_abs ~ normal(0, prior_sigma_share);
   sigma_margin ~ normal(0, prior_sigma_margin); 
 

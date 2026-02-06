@@ -297,7 +297,8 @@ stan_data <- list(
   prior_sigma_share = 0.005, # Absolute (0.5% share tolerance)
   prior_sigma_margin = 1.0 * mean(1 / simdata$margin, na.rm = TRUE), # Loose (1.0) Margin Tolerance
   prior_sigma_meanval_strat = 1.5, # Increased to 1.5 to absorb variation from removed assets
-  prior_sigma_meanval_fringe = 0.3 # Slightly looser (heterogeneous small banks)
+  prior_sigma_meanval_fringe = 0.3, # Slightly looser (heterogeneous small banks)
+  prior_lkj = 4.0 # Skeptical prior for Rho
 )
 
 # Export for Debugging
