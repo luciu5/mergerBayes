@@ -15,16 +15,16 @@ functions {
   real partial_sum_fast(array[] int slice_idx,
                         int start, int end,
                         // --- DATA ---
-                        vector logshareIn, vector marginInv, 
+                        vector marginInv, 
                         vector shareIn, vector rateDiff,
-                        array[] int event, array[] int tophold, array[] int year,
+                        array[] int event, array[] int tophold,
                         // --- PARAMETERS ---
                         vector a_event, vector b_event, 
                         vector b_tophold_raw, 
                         real sigma_b_strat,
                         real mu_b_fringe, real sigma_b_fringe,
                         
-                        vector s0, vector year_effect_demand, vector year_effect_supply,
+                        vector s0,
                         vector cutoff_share, 
                         // --- SCALARS ---
                         real sigma_share_abs, real sigma_margin, 
@@ -57,7 +57,6 @@ functions {
       real mu1 = s0[e] + 
                  b_event[e] + 
                  b_quality + 
-                 year_effect_demand[year[i]] + 
                  (a_event[e] * rateDiff[i]);
 
       // --- B. SUPPLY MEAN ---
@@ -86,7 +85,7 @@ functions {
         inv_markup = alpha_structural;
       }
       
-      real mu2 = inv_markup + year_effect_supply[year[i]];
+      real mu2 = inv_markup;
 
       // --- C. ACCUMULATE ---
       // 1. DEMAND: Absolute Error on Shares
@@ -110,8 +109,7 @@ data {
   array[N] int<lower=1> event;
   int<lower=1> N_tophold;
   array[N] int<lower=1> tophold;
-  int<lower=1> N_year;
-  array[N] int<lower=1> year;
+
 
   vector[N_event] log_deposits;
 
@@ -149,27 +147,20 @@ transformed data {
 }
 
 parameters {
-  real mu_year_demand;
-  real<lower=0> sigma_year_demand;
-  vector[N_year] year_raw_demand;
-  
-  real mu_b_event;
-  real<lower=0> sigma_b_event;
-  vector[N_event] b_event_raw;
+  vector[is_single_market == 0 ? 1 : 0] mu_b_event_vec;
+  vector<lower=0>[is_single_market == 0 ? 1 : 0] sigma_b_event_vec;
+  vector[is_single_market == 0 ? N_event : 0] b_event_raw;
   
   vector[N_tophold] b_tophold_raw;
   real<lower=0> sigma_b_strat;
-  real mu_b_fringe;
-  real<lower=0> sigma_b_fringe;
+  vector[N_cutoff > 0 ? 1 : 0] mu_b_fringe_vec;  // Only if cutoff used
+  vector<lower=0>[N_cutoff > 0 ? 1 : 0] sigma_b_fringe_vec;  // Only if cutoff used
   
   real mu_log_a;
-  real<lower=0> sigma_log_a;
-  vector[N_event] r_event_a_raw;
+  vector<lower=0>[is_single_market == 0 ? 1 : 0] sigma_log_a_vec;
+  vector[is_single_market == 0 ? N_event : 0] r_event_a_raw;
 
-  vector[N_supply_int] mu_year_supply_raw;
-  real<lower=0> sigma_year_supply;
-  vector[N_year] year_raw_supply;
-  
+
   vector<lower=0>[N_event] s0_offset; 
   vector<lower=0, upper=1>[N_cutoff] cutoff_share;
 
@@ -179,16 +170,18 @@ parameters {
 }
 
 transformed parameters {
-  vector[N_year] year_effect_demand = mu_year_demand + sigma_year_demand * year_raw_demand;
-  real mu_year_supply_scalar = (fix_supply_intercept == 1) ? 0.0 : mu_year_supply_raw[1];
-  vector[N_year] year_effect_supply = mu_year_supply_scalar + sigma_year_supply * year_raw_supply;
-  vector[N_event] a_event = exp(mu_log_a + sigma_log_a * r_event_a_raw);
+  real sigma_log_a = (is_single_market == 0) ? sigma_log_a_vec[1] : 0.0;
+  vector[N_event] a_event = (is_single_market == 1) ? rep_vector(exp(mu_log_a), N_event) : exp(mu_log_a + sigma_log_a * r_event_a_raw);
+  
+  // Scalar accessors for conditional fringe parameters
+  real mu_b_fringe = (N_cutoff > 0) ? mu_b_fringe_vec[1] : 0.0;
+  real sigma_b_fringe = (N_cutoff > 0) ? sigma_b_fringe_vec[1] : 0.0;
   
   vector[N_event] b_event;
   if (is_single_market == 1) {
      b_event = rep_vector(0.0, N_event); 
   } else {
-     b_event = mu_b_event + sigma_b_event * b_event_raw;
+     b_event = mu_b_event_vec[1] + sigma_b_event_vec[1] * b_event_raw;
   }
   
   vector[N_event] s0;
@@ -200,37 +193,28 @@ transformed parameters {
 model {
   // --- Priors ---
   if (is_single_market == 1) {
-    sigma_log_a ~ normal(0, 0.001); 
     // Use passed-in prior for the single alpha
     mu_log_a ~ normal(log(prior_alpha_mean), prior_alpha_sd); 
-    sigma_b_event ~ normal(0, 0.001);
   } else {
-    sigma_log_a ~ exponential(1); 
+    sigma_log_a_vec ~ exponential(1); 
     // Use passed-in prior for the global mean alpha
     mu_log_a ~ normal(log(prior_alpha_mean), prior_alpha_sd); 
-    sigma_b_event ~ normal(0, 0.5); 
+    sigma_b_event_vec ~ normal(0, 0.5); 
   }
-  r_event_a_raw ~ std_normal();
-  b_event_raw ~ std_normal();
-  mu_b_event ~ normal(0, 1.0); // FIXED: Added prior to prevent drift
+  if (is_single_market == 0) {
+    r_event_a_raw ~ std_normal();
+    b_event_raw ~ std_normal();
+    mu_b_event_vec ~ normal(0, 1.0); 
+  }
   b_tophold_raw ~ std_normal();
   
+  
   sigma_b_strat ~ normal(0, prior_sigma_meanval_strat); 
-  sigma_b_fringe ~ normal(0, prior_sigma_meanval_fringe); 
-  mu_b_fringe ~ normal(0, 1);
   
-  if (N_year == 1) {
-      sigma_year_demand ~ normal(0, 0.001); year_raw_demand ~ normal(0, 0.001);
-      sigma_year_supply ~ normal(0, 0.001); year_raw_supply ~ normal(0, 0.001);
-  } else {
-      sigma_year_demand ~ exponential(1); year_raw_demand ~ std_normal();
-      sigma_year_supply ~ exponential(1); year_raw_supply ~ std_normal();
+  if (N_cutoff > 0) {
+    sigma_b_fringe_vec ~ normal(0, prior_sigma_meanval_fringe); 
+    mu_b_fringe_vec ~ normal(0, 1); 
   }
-  mu_year_demand ~ std_normal();
-  
-  if (fix_supply_intercept == 0) {
-    mu_year_supply_raw ~ std_normal();
-  } 
 
   s0_offset ~ normal(0, 2.0);
 
@@ -251,11 +235,11 @@ model {
   target += reduce_sum(
     partial_sum_fast,
     seq, grainsize,
-    logshareIn, marginInv, shareIn, rateDiff,
-    event, tophold, year,
+    marginInv, shareIn, rateDiff,
+    event, tophold,
     a_event, b_event, 
     b_tophold_raw, sigma_b_strat, mu_b_fringe, sigma_b_fringe,
-    s0, year_effect_demand, year_effect_supply, cutoff_share, 
+    s0, cutoff_share, 
     sigma_share_abs, sigma_margin,  
     rateDiff_sd,
     supply_model, use_cutoff
@@ -284,7 +268,7 @@ generated quantities {
        real b_quality = mu_eff + sigma_eff * b_tophold_raw[tophold[n]];
        
        real mu1 = s0[e] + b_event[e] + b_quality + 
-                  year_effect_demand[year[n]] + (a_event[e] * rateDiff[n]);
+                  (a_event[e] * rateDiff[n]);
        
        real alpha_structural = a_event[e] / rateDiff_sd;
        real inv_markup;
@@ -302,7 +286,7 @@ generated quantities {
          inv_markup = alpha_structural;
        }
        
-       real mu2 = inv_markup + year_effect_supply[year[n]];
+       real mu2 = inv_markup;
        
        pred_logshareIn[n] = mu1;
        pred_marginInv[n] = mu2;
@@ -312,3 +296,6 @@ generated quantities {
      }
   }
 }
+
+
+

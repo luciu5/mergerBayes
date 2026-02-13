@@ -61,8 +61,6 @@ sdata <- list(
     event = rep(1L, nrow(simdata)),
     N_tophold = nlevels(simdata$tophold),
     tophold = as.integer(simdata$tophold),
-    N_year = 1,
-    year = rep(1L, nrow(simdata)),
     log_deposits = as.array(0.0), # Scalar array for N_event=1
 
     supply_model = 1, # Bertrand
@@ -74,7 +72,7 @@ sdata <- list(
     avg_price_hmt = mean(simdata$rate_deposits),
     avg_margin_hmt = mean(simdata$margin),
     ssnip_hmt = 0.05,
-    prior_sigma_share = 0.1,
+    prior_sigma_share = 0.01,
     prior_sigma_margin = 1.0,
     prior_sigma_meanval_strat = 1.0,
     prior_sigma_meanval_fringe = 1.0,
