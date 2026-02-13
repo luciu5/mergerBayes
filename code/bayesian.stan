@@ -1,7 +1,4 @@
 functions {
-  // ---------------------------------------------------------------------------
-  // 1. SOFT HMT PENALTY (One-Sided)
-  // ---------------------------------------------------------------------------
   real soft_hmt_penalty(real agg_elast, real max_elast, real scale) {
     if (agg_elast > max_elast) {
       return normal_lpdf(agg_elast | max_elast, scale) - normal_lpdf(max_elast | max_elast, scale);
@@ -9,99 +6,64 @@ functions {
     return 0.0; 
   }
 
-  // ---------------------------------------------------------------------------
-  // 2. OPTIMIZED JOINT LIKELIHOOD FUNCTION
-  // ---------------------------------------------------------------------------
-  real partial_sum_fast(array[] int slice_idx,
-                        int start, int end,
-                        // --- DATA ---
-                        vector marginInv, 
-                        vector shareIn, vector rateDiff,
-                        array[] int event, array[] int tophold, array[] int year,
-                        // --- PARAMETERS ---
-                        vector a_event, vector b_event, 
-                        // RE STRUCTURE MODIFIED: Raw params + Split Hyperparams
-                        vector b_tophold_raw, 
-                        real mu_b_strat, real sigma_b_strat,
-                        real mu_b_fringe, real sigma_b_fringe,
-                        
-                        vector s0, vector year_effect_demand, vector year_effect_supply,
-                        vector cutoff_share, 
-                        // --- SCALARS ---
-                        real sigma_share_abs, real sigma_margin, real rho,
-                        real rateDiff_sd,
-                        int supply_model, int use_cutoff) {
+  real partial_sum_fast(array[] int slice_idx, int start, int end,
+                        vector marginInv, vector shareIn, vector rateDiff,
+                        array[] int event, array[] int tophold, array[] int year, array[] int market_year_idx,
+                        vector a_event, vector b_event, vector b_quality_all, 
+                        real sigma_b_strat, real mu_b_fringe, real sigma_b_fringe,
+                        vector s0,
+                        vector cutoff_share, real sigma_share, real sigma_margin, real rho,
+                        real rateDiff_sd, int supply_model, int use_cutoff, int is_single_market) {
     
     real lp = 0;
     int N_slice = end - start + 1;
     real sigma_cond = sigma_margin * sqrt(1.0 - square(rho));
-    real slope_cond = rho * (sigma_margin / sigma_share_abs);
-    // SMOOTHING: Increased k from 0.05 to 0.2 to help Bridge Sampling navigate the switch
+    real slope_cond = rho * (sigma_margin / sigma_share);
     real k = 0.2; 
     
     for (n in 1:N_slice) {
       int i = slice_idx[n];
       int e = event[i];
+      int mky = market_year_idx[i];
 
-      // --- HYBRID LOGIC ---
-      real w = 0; // Default: Strategic (w=0)
+      // SAFETY FLOOR: Consistent with bayesian_single
+      real s_out = inv_logit(s0[mky]);
+      if (s_out < 0.01) s_out = 0.01; 
+      
+      real w = 0; 
       if (use_cutoff == 1) {
         real x = -(shareIn[i] - cutoff_share[e]) / k;
         if (x > 10) w = 1.0; else if (x < -10) w = 0.0; else w = inv_logit(x);
       }
       
-      // Dynamic Mean Valuation: Mix Fringe/Strategic distributions
-      real mu_eff    = w * mu_b_fringe    + (1-w) * mu_b_strat;
-      real sigma_eff = w * sigma_b_fringe + (1-w) * sigma_b_strat;
-      real b_quality = mu_eff + sigma_eff * b_tophold_raw[tophold[i]];
-
-      // --- A. DEMAND MEAN ---
-      real mu1 = s0[e] + 
-                 b_event[e] + 
-                 b_quality + 
-                 year_effect_demand[year[i]] + 
-                 (a_event[e] * rateDiff[i]);
-
-      // --- B. SUPPLY MEAN ---
-      real s = shareIn[i];
-      real s_out = inv_logit(s0[e]);
-      if (s_out < 0.01) s_out = 0.01;
+      real b_quality = b_quality_all[tophold[i]] + (w * mu_b_fringe);
+      real delta = b_event[e] + b_quality + (a_event[e] * rateDiff[i]);
       
-      real inv_markup;
+      // STABLE PREDICTED SHARE (Absolute Volume Space)
+      // We use the logit(s0) as the log-sum intercept
+      real mu1 = s0[mky] + delta;
+      real pred_s = exp(mu1); 
+
       real alpha_structural = a_event[e] / rateDiff_sd;
       
+      real inv_markup;
       if (supply_model == 1) { 
-        // Bertrand (Hybrid: w=1 -> MonCom, w=0 -> Bertrand)
-        inv_markup = alpha_structural * (w + (1-w) * (1.0 - s * (1.0 - s_out)));
+        inv_markup = alpha_structural * (w + (1-w) * (1.0 - shareIn[i] * (1.0 - s_out)));
       } else if (supply_model == 2) { 
-        // Auction
-        real denom = s * (1.0 - s_out);
-        if (denom > 0.99) denom = 0.99;
-        real log_term = -log(1.0 - denom);
-        if (s < 0.001) inv_markup = alpha_structural * (w + (1-w)); 
-        else inv_markup = alpha_structural * (w + (1-w) * (denom / log_term)); // Fixed mixing logic
+        real denom = fmin(0.99, shareIn[i] * (1.0 - s_out));
+        inv_markup = alpha_structural * (w + (1-w) * (denom / -log(1.0 - denom)));
       } else if (supply_model == 3) {
-        // Cournot
-        inv_markup = alpha_structural * (w + (1-w) * (s_out / (s_out + s) ));
+        inv_markup = alpha_structural * (w + (1-w) * (s_out / (s_out + shareIn[i])));
       } else {
-        // MonComp (Always MonCom)
         inv_markup = alpha_structural;
       }
       
-      real mu2 = inv_markup + year_effect_supply[year[i]];
-
-      // --- C. ACCUMULATE ---
-      // 1. Calculate Expected Share
-      real pred_share = exp(mu1);
-      
-      // 2. Share Error
-      real err_share = shareIn[i] - pred_share;
-      
-      // 3. Conditional Mean for Margin
+      real mu2 = inv_markup;
+      real err_share = shareIn[i] - pred_s;
       real mu2_cond = mu2 + slope_cond * err_share;
       
-      // 4. LPDF Accumulation
-      lp += normal_lpdf(shareIn[i] | pred_share, sigma_share_abs); 
+      // ABSOLUTE ERROR: No Dirac-Logit Collapse
+      lp += normal_lpdf(shareIn[i] | pred_s, sigma_share); 
       lp += normal_lpdf(marginInv[i] | mu2_cond, sigma_cond);
     }
     return lp;
@@ -111,166 +73,178 @@ functions {
 data {
   int<lower=1> N;
   vector[N] shareIn;
-  vector<lower=0>[N] marginInv; 
+  vector<lower=0>[N] marginInv;  
   vector[N] rateDiff;
   real<lower=0> rateDiff_sd;
-  
   int<lower=1> N_event;
   array[N] int<lower=1> event;
   int<lower=1> N_tophold;
   array[N] int<lower=1> tophold;
   int<lower=1> N_year;
   array[N] int<lower=1> year;
-
-  vector[N_event] log_deposits;
-
   int<lower=1, upper=4> supply_model; 
   int<lower=0, upper=1> use_cutoff;
   int<lower=1> grainsize;
-  
+  int<lower=1> N_market_year;
+  array[N] int<lower=1> market_year_idx;
+  int<lower=0> K_s0;        
+  matrix[N_market_year, K_s0] X_s0; 
+  array[N_market_year] int<lower=1> mky_to_event;
+  array[N_market_year] int<lower=1> mky_to_year;
   int<lower=0, upper=1> is_single_market;  
-  int<lower=0, upper=1> use_hmt;           
+  int<lower=0, upper=1> use_rho; 
+  int<lower=0, upper=1> use_hmt;
   int<lower=0, upper=1> fix_supply_intercept; 
-  
-  real avg_price_hmt;   
-  real avg_margin_hmt;
+  real avg_price_hmt; 
+  real avg_margin_hmt; 
   real ssnip_hmt;   
-
-  real<lower=0> prior_sigma_share;
+  real<lower=0> prior_sigma_share; 
   real<lower=0> prior_sigma_margin;
-  real<lower=0> prior_sigma_meanval_strat; // Renamed
-  real<lower=0> prior_sigma_meanval_fringe; // Added
-  
-  vector<lower=0, upper=1>[N_event] min_s0; // Added: Fringe share lower bound
-  real<lower=0> prior_lkj; // Added: LKJ Prior Shape
+  real<lower=0> prior_sigma_meanval_strat; 
+  real<lower=0> prior_sigma_meanval_fringe; 
+  real prior_alpha_mean; 
+  real<lower=0> prior_alpha_sd; 
+  real s0_prior_mean; 
+  real<lower=0> s0_prior_sd; 
+  real<lower=0> prior_sigma_alpha; 
+  real<lower=0> prior_sigma_beta_s0; 
+  real<lower=0> prior_lkj;
+  vector<lower=0, upper=1>[N_market_year] min_s0; 
 }
 
 transformed data {
-  vector[N] logshareIn = log(shareIn);
   array[N] int seq;
   for (i in 1:N) seq[i] = i;
-  // Conditional Parameter Size
-  int N_cutoff = (use_cutoff == 1) ? N_event : 0;
-  // If fixed, remove intercept param entirely to stabilize Bridge Sampling
-  int N_supply_int = (fix_supply_intercept == 1) ? 0 : 1; 
 }
 
 parameters {
-  real mu_year_demand;
-  real<lower=0> sigma_year_demand;
-  vector[N_year] year_raw_demand;
-  
-  real mu_b_event;
-  real<lower=0> sigma_b_event;
-  vector[N_event] b_event_raw;
-  
-  // Bank FE (Splitting Mean/Sigma by Type)
+  vector[is_single_market == 0 ? 1 : 0] mu_b_event_vec;
+  vector<lower=0>[is_single_market == 0 ? 1 : 0] sigma_b_event_vec;
+  vector[is_single_market == 0 ? N_event : 0] b_event_raw;
   vector[N_tophold] b_tophold_raw;
-  real mu_b_strat;
   real<lower=0> sigma_b_strat;
-  real mu_b_fringe;
-  real<lower=0> sigma_b_fringe;
-  
-  
+  vector[use_cutoff == 1 ? 1 : 0] mu_b_fringe_vec;
+  vector<lower=0>[use_cutoff == 1 ? 1 : 0] sigma_b_fringe_vec;
   real mu_log_a;
-  real<lower=0> sigma_log_a;
-  vector[N_event] r_event_a_raw;
-
-  // --- Supply Hierarchical ---
-  // Conditional: Only estimate if NOT fixed to 0
-  vector[N_supply_int] mu_year_supply_raw;
+  vector<lower=0>[is_single_market == 0 ? 1 : 0] sigma_log_a_vec;
+  vector[is_single_market == 0 ? N_event : 0] r_event_a_raw;
+  vector<lower=0>[N_market_year] s0_offset; 
+  vector<lower=0, upper=1>[(use_cutoff == 1) ? N_event : 0] cutoff_share;
+  vector<lower=-1, upper=1>[use_rho == 1 ? 1 : 0] rho_param; 
+  real<lower=0> sigma_share;    
+  real<lower=0> sigma_margin;     
+  vector<lower=0>[N_market_year > 1 ? 1 : 0] sigma_s0_vec; // Residual s0 scale
   
-  real<lower=0> sigma_year_supply;
-  vector[N_year] year_raw_supply;
+  // Hierarchical S0
+  vector[is_single_market == 0 ? N_event : 0] mu_s0_event_raw;
+  vector<lower=0>[is_single_market == 0 ? 1 : 0] sigma_s0_event;
+  vector[N_year > 1 ? N_year : 0] year_effect_s0_raw;
+  vector<lower=0>[N_year > 1 ? 1 : 0] sigma_year_s0;
   
-  // S0: Hard Floor Offset (Positive Constraint)
-  vector<lower=0>[N_event] s0_offset; 
-  
-  vector<lower=0, upper=1>[N_cutoff] cutoff_share;
-
-  cholesky_factor_corr[2] Lrescor; 
-  real<lower=0> sigma_share_abs;    
-  real<lower=0> sigma_margin;      
+  vector[K_s0] beta_s0;
 }
 
 transformed parameters {
-  corr_matrix[2] Corr;
-  real rho;                
-  Corr = multiply_lower_tri_self_transpose(Lrescor);
+  real rho = 0.0;
+  if (use_rho == 1) rho = rho_param[1];
   
-  // FIX: For single market, force rho to 0 to prevent identification issues
-  // The Lrescor parameter remains but is detached from the likelihood
-  rho = (is_single_market == 1) ? 0.0 : Corr[1,2];
-
-  vector[N_year] year_effect_demand = mu_year_demand + sigma_year_demand * year_raw_demand;
+  real sigma_log_a = 0.0;
+  if (is_single_market == 0) sigma_log_a = sigma_log_a_vec[1];
   
-  // Handle Fixed Intercept Logic (Hard Zero vs Estimated)
-  real mu_year_supply_scalar = (fix_supply_intercept == 1) ? 0.0 : mu_year_supply_raw[1];
-  vector[N_year] year_effect_supply = mu_year_supply_scalar + sigma_year_supply * year_raw_supply;
-  
-  vector[N_event] a_event = exp(mu_log_a + sigma_log_a * r_event_a_raw);
+  vector[N_event] a_event;
+  if (is_single_market == 1) {
+    a_event = rep_vector(exp(mu_log_a), N_event);
+  } else {
+    a_event = exp(mu_log_a + sigma_log_a * r_event_a_raw);
+  }
   
   vector[N_event] b_event;
   if (is_single_market == 1) {
-     b_event = rep_vector(0.0, N_event); 
+    b_event = rep_vector(0.0, N_event);
   } else {
-     b_event = mu_b_event + sigma_b_event * b_event_raw;
+    b_event = mu_b_event_vec[1] + sigma_b_event_vec[1] * b_event_raw;
+  }
+  vector[N_tophold] b_quality_all = sigma_b_strat * b_tophold_raw;
+  
+  // Fringe effects: Identified only if cutoff is active
+  real mu_b_fringe = 0.0;
+  real sigma_b_fringe = 0.0;
+  if (use_cutoff == 1) {
+    mu_b_fringe = mu_b_fringe_vec[1];
+    sigma_b_fringe = sigma_b_fringe_vec[1];
+  }
+
+  vector[is_single_market == 0 ? N_event : 0] mu_s0_event;
+  if (is_single_market == 1) {
+    mu_s0_event = rep_vector(0.0, 0);
+  } else {
+    mu_s0_event = sigma_s0_event[1] * mu_s0_event_raw;
   }
   
-  // HARD FLOOR CONSTRAINT:
-  // s0 is the logit of the outside share.
-  // We enforce s0 > logit(fringe_share) by adding a positive offset.
-  vector[N_event] s0;
-  for (e in 1:N_event) {
-     s0[e] = logit(fmax(min_s0[e], 0.001)) + s0_offset[e];
+  vector[N_year > 1 ? N_year : 0] year_effect_s0;
+  if (N_year > 1) {
+    year_effect_s0 = sigma_year_s0[1] * year_effect_s0_raw;
+  } else {
+    year_effect_s0 = rep_vector(0.0, 0);
+  }
+
+  vector[N_market_year] s0;
+  for (m in 1:N_market_year) {
+     int e = mky_to_event[m];
+     int t = mky_to_year[m];
+     real base_logit = logit(fmax(min_s0[m], 1e-6));
+     real x_beta = (K_s0 > 0) ? (X_s0[m] * beta_s0) : 0.0;
+     real mkt_effect = 0.0;
+     if (is_single_market == 0) mkt_effect = mu_s0_event[e];
+     
+     real yr_effect = 0.0;
+     if (N_year > 1) yr_effect = year_effect_s0[t];
+     
+     s0[m] = base_logit + x_beta + mkt_effect + yr_effect + s0_offset[m];
   }
 }
 
 model {
-  // --- Priors ---
+  mu_log_a ~ normal(log(prior_alpha_mean), prior_alpha_sd);
   if (is_single_market == 1) {
-    sigma_log_a ~ normal(0, 0.001); 
-    mu_log_a ~ normal(0, 0.5); 
-    sigma_b_event ~ normal(0, 0.001);
+    // No prior needed for sigma_log_a
   } else {
-    sigma_log_a ~ exponential(1); 
-    mu_log_a ~ normal(0, 0.5); 
-    sigma_b_event ~ normal(0, 0.5); 
+    sigma_log_a_vec ~ normal(0, 0.5); 
+    r_event_a_raw ~ std_normal();
+    mu_b_event_vec ~ normal(0, 1.0); 
+    b_event_raw ~ std_normal();
+    sigma_b_event_vec ~ normal(0, 0.5); 
   }
-  r_event_a_raw ~ std_normal();
-  b_event_raw ~ std_normal();
-  
-  // Bank Heterogeneity: Split Priors
   b_tophold_raw ~ std_normal();
   
-  sigma_b_strat ~ normal(0, prior_sigma_meanval_strat); 
-  mu_b_strat ~ normal(0, 1);
-  
-  sigma_b_fringe ~ normal(0, prior_sigma_meanval_fringe); 
-  mu_b_fringe ~ normal(0, 1);
-  
-  if (N_year == 1) {
-      sigma_year_demand ~ normal(0, 0.001); year_raw_demand ~ normal(0, 0.001);
-      sigma_year_supply ~ normal(0, 0.001); year_raw_supply ~ normal(0, 0.001);
-  } else {
-      sigma_year_demand ~ exponential(1); year_raw_demand ~ std_normal();
-      sigma_year_supply ~ exponential(1); year_raw_supply ~ std_normal();
+  sigma_b_strat ~ normal(0, prior_sigma_meanval_strat);
+  if (use_cutoff == 1) {
+    sigma_b_fringe_vec ~ normal(0, prior_sigma_meanval_fringe);
+    mu_b_fringe_vec ~ normal(0, 2);
   }
-  mu_year_demand ~ std_normal();
   
-  // Supply Intercept Prior (Only if estimated)
-  if (fix_supply_intercept == 0) {
-    mu_year_supply_raw ~ std_normal();
-  } 
+  if (N_market_year > 1) {
+    s0_offset ~ normal(0, sigma_s0_vec[1]); 
+    sigma_s0_vec ~ normal(0, 1.0);
+  } else {
+    s0_offset ~ normal(0, 5.0); // Non-hierarchical broad prior
+  }
+  beta_s0 ~ normal(0, prior_sigma_beta_s0);
 
-  // S0 Offset Prior (Half-Normal)
-  // Relaxed to allow outside share to be significantly larger than fringe share
-  // (e.g. if fringe=5% (logit -3) but outside=30% (logit -1), need offset +2)
-  s0_offset ~ normal(0, 2.0); 
+  if (is_single_market == 0) {
+    mu_s0_event_raw ~ std_normal();
+    sigma_s0_event ~ normal(0, 1.0);
+  }
+  if (N_year > 1) {
+    year_effect_s0_raw ~ std_normal();
+    sigma_year_s0 ~ normal(0, 1.0);
+  }  
+  if (use_rho == 1) {
+    rho_param ~ uniform(-1, 1); // Equivalent to LKJ(1) for 2x2
+  }
+  sigma_share ~ normal(0, prior_sigma_share); 
+  sigma_margin ~ normal(0, prior_sigma_margin); 
 
-  // REMOVED GHOSTS (logit_mu_s0, tau_s0, beta_deposits)
- 
-  
   if (use_hmt == 1) {
      real alpha_check = exp(mu_log_a) / rateDiff_sd; 
      real s0_check = mean(inv_logit(s0));
@@ -278,92 +252,55 @@ model {
      real max_elasticity = 1.0 / (ssnip_hmt + avg_margin_hmt);
      target += soft_hmt_penalty(agg_elasticity, max_elasticity, 0.1);
   }
-  
-  if (use_cutoff == 1) cutoff_share ~ beta(3, 100);
-  
-  Lrescor ~ lkj_corr_cholesky(prior_lkj); 
-  sigma_share_abs ~ normal(0, prior_sigma_share);
-  sigma_margin ~ normal(0, prior_sigma_margin); 
 
-  target += reduce_sum(
-    partial_sum_fast,
-    seq, grainsize,
-    marginInv, shareIn, rateDiff,
-    event, tophold, year,
-    a_event, b_event, 
-    b_tophold_raw, mu_b_strat, sigma_b_strat, mu_b_fringe, sigma_b_fringe,
-    s0, year_effect_demand, year_effect_supply, cutoff_share, 
-    sigma_share_abs, sigma_margin, rho,
-    rateDiff_sd,
-    supply_model, use_cutoff
-  );
+  target += reduce_sum(partial_sum_fast, seq, grainsize,
+                       marginInv, shareIn, rateDiff, event, tophold, year, market_year_idx,
+                       a_event, b_event, b_quality_all, sigma_b_strat, mu_b_fringe, sigma_b_fringe,
+                       s0, cutoff_share, 
+                       sigma_share, sigma_margin, rho, rateDiff_sd, supply_model, use_cutoff, is_single_market);
 }
 
 generated quantities {
-  corr_matrix[2] Rescor = multiply_lower_tri_self_transpose(Lrescor);
-  real rho_gen = rho; // Use the effective rho (0 if single market)
-  
-  vector[N] log_lik;
   vector[N] pred_shareIn;
   vector[N] pred_marginInv;
   
   {
-     real sigma_cond = sigma_margin * sqrt(1.0 - square(rho));
-     real slope_cond = rho * (sigma_margin / sigma_share_abs);
-     // SMOOTHING: Increased k from 0.05 to 0.2 to help Bridge Sampling navigate the switch
-     real k = 0.2; 
-
-     for (n in 1:N) {
-       int e = event[n];
-       
-       // Hybrid W Re-calculation
-       real w = 0; 
-       if (use_cutoff == 1) {
-         real x = -(shareIn[n] - cutoff_share[e]) / k; // Assuming N_event indexing map is valid (cutoff_share size checked)
-         // Note: If use_cutoff=1, N_cutoff=N_event. Safe.
-         if (x > 10) w = 1.0; else if (x < -10) w = 0.0; else w = inv_logit(x);
-       }
-
-       real mu_eff    = w * mu_b_fringe    + (1-w) * mu_b_strat;
-       real sigma_eff = w * sigma_b_fringe + (1-w) * sigma_b_strat;
-       real b_quality = mu_eff + sigma_eff * b_tophold_raw[tophold[n]];
-       
-       real mu1 = s0[e] + b_event[e] + b_quality + 
-                  year_effect_demand[year[n]] + (a_event[e] * rateDiff[n]);
-       
-       real alpha_structural = a_event[e] / rateDiff_sd;
-       real inv_markup;
-       real s = shareIn[n];
-       real s_out = inv_logit(s0[e]);
-       if (s_out < 0.01) s_out = 0.01;
-       
-       if (supply_model == 1) { 
-         inv_markup = alpha_structural * (w + (1-w) * (1.0 - s * (1.0 - s_out)));
-       } else if (supply_model == 2) { 
-         // Auction
-         real denom = s * (1.0 - s_out);
-         if (denom > 0.99) denom = 0.99;
-         real log_term = -log(1.0 - denom);
-         if (s < 0.001) inv_markup = alpha_structural * (w + (1-w)); 
-         else inv_markup = alpha_structural * (w + (1-w) * (denom / log_term)); 
-       } else if (supply_model == 3) {
-         inv_markup = alpha_structural * (w + (1-w) * (s_out / (s_out + s) ));
-       } else {
-         inv_markup = alpha_structural;
-       }
-       
-       real mu2 = inv_markup + year_effect_supply[year[n]];
-       
-       // Calculate Expected Share
-       real pred_share = exp(mu1);
-       pred_shareIn[n] = pred_share;
-       pred_marginInv[n] = mu2;
-       
-       real err_share = shareIn[n] - pred_share;
-       real mu2_cond = mu2 + slope_cond * err_share;
-       
-       log_lik[n] = normal_lpdf(shareIn[n] | pred_share, sigma_share_abs) + 
-                    normal_lpdf(marginInv[n] | mu2_cond, sigma_cond);
-     }
+    real k = 0.2; 
+    for (n in 1:N) {
+      int e = event[n];
+      int mky = market_year_idx[n];
+      
+      real w = 0; 
+      if (use_cutoff == 1) {
+        real x = -(shareIn[n] - cutoff_share[e]) / k;
+        if (x > 10) w = 1.0; else if (x < -10) w = 0.0; else w = inv_logit(x);
+      }
+      
+      real b_quality = b_quality_all[tophold[n]] + (w * mu_b_fringe);
+      real delta = b_event[e] + b_quality + (a_event[e] * rateDiff[n]);
+      
+      real mu1 = s0[mky] + delta;
+      pred_shareIn[n] = exp(mu1);
+      
+      real s_out = inv_logit(s0[mky]);
+      if (s_out < 0.01) s_out = 0.01; 
+      real alpha_structural = a_event[e] / rateDiff_sd;
+      
+      real inv_markup;
+      if (supply_model == 1) { 
+        inv_markup = alpha_structural * (w + (1-w) * (1.0 - shareIn[n] * (1.0 - s_out)));
+      } else if (supply_model == 2) { 
+        real denom = fmin(0.99, shareIn[n] * (1.0 - s_out));
+        inv_markup = alpha_structural * (w + (1-w) * (denom / -log(1.0 - denom)));
+      } else if (supply_model == 3) {
+        inv_markup = alpha_structural * (w + (1-w) * (s_out / (s_out + shareIn[n])));
+      } else {
+        inv_markup = alpha_structural;
+      }
+      
+      pred_marginInv[n] = inv_markup;
+    }
   }
 }
+
+
