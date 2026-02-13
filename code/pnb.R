@@ -176,7 +176,8 @@ sdata_template <- list(
   prior_sigma_alpha = 1.0,
   prior_sigma_beta_s0 = 1.0,
   prior_lkj = 2.0,
-  min_s0 = as.array(min_s0_data$min_s0)
+
+  implied_s0 = as.array(min_s0_data$min_s0)
 )
 
 # Compile Model
@@ -221,7 +222,7 @@ get_alpha_prior <- function(model_name, data) {
 }
 
 # --- BATCH EXECUTION FUNCTION ---
-run_batch <- function(sdata, suffix, adapt_delta = 0.99) {
+run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
   hmt_status <- if (sdata$use_hmt == 1) "HMT-Constrained" else "Unconstrained"
   intercept_status <- if (sdata$fix_supply_intercept == 1) "Fixed-Intercept" else "Free-Intercept"
   
@@ -232,7 +233,7 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.99) {
   cat(msg)
   results <- list()
 
-  for (m in 1:length(models)) {
+  for (m in 1:1) {
     model_name <- models[m]
     
     cat("\n")
@@ -253,10 +254,9 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.99) {
     cat(sprintf("   Alpha Prior: Normal(%.2f, %.2f)\n", prior$mean, prior$sd))
 
 
-    # Safe initialization for s0_offset (matching run_pnb_single.R)
     init_fun <- function() {
       list(
-        s0_offset = as.array(rep(qlogis(0.05) - qlogis(min_s0_data$min_s0[1]), sdata$N_market_year)),
+        s0_logit = as.array(rep(qlogis(0.02), sdata$N_market_year)),
         mu_log_a = log(sdata$prior_alpha_mean)
       )
     }

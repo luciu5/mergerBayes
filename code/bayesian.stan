@@ -28,7 +28,6 @@ functions {
 
       // SAFETY FLOOR: Consistent with bayesian_single
       real s_out = inv_logit(s0[mky]);
-      if (s_out < 0.01) s_out = 0.01; 
       
       real w = 0; 
       if (use_cutoff == 1) {
@@ -109,7 +108,7 @@ data {
   real<lower=0> prior_sigma_alpha; 
   real<lower=0> prior_sigma_beta_s0; 
   real<lower=0> prior_lkj;
-  vector<lower=0, upper=1>[N_market_year] min_s0; 
+  vector<lower=0, upper=1>[N_market_year] implied_s0; 
 }
 
 transformed data {
@@ -128,7 +127,7 @@ parameters {
   real mu_log_a;
   vector<lower=0>[is_single_market == 0 ? 1 : 0] sigma_log_a_vec;
   vector[is_single_market == 0 ? N_event : 0] r_event_a_raw;
-  vector<lower=0>[N_market_year] s0_offset; 
+  vector<lower=logit(0.01), upper=logit(0.99)>[N_market_year] s0_logit; 
   vector<lower=0, upper=1>[(use_cutoff == 1) ? N_event : 0] cutoff_share;
   vector<lower=-1, upper=1>[use_rho == 1 ? 1 : 0] rho_param; 
   real<lower=0> sigma_share;    
@@ -192,7 +191,7 @@ transformed parameters {
   for (m in 1:N_market_year) {
      int e = mky_to_event[m];
      int t = mky_to_year[m];
-     real base_logit = logit(fmax(min_s0[m], 1e-6));
+     real base_logit = s0_logit[m];
      real x_beta = (K_s0 > 0) ? (X_s0[m] * beta_s0) : 0.0;
      real mkt_effect = 0.0;
      if (is_single_market == 0) mkt_effect = mu_s0_event[e];
@@ -200,7 +199,7 @@ transformed parameters {
      real yr_effect = 0.0;
      if (N_year > 1) yr_effect = year_effect_s0[t];
      
-     s0[m] = base_logit + x_beta + mkt_effect + yr_effect + s0_offset[m];
+     s0[m] = base_logit + x_beta + mkt_effect + yr_effect;
   }
 }
 
@@ -224,10 +223,10 @@ model {
   }
   
   if (N_market_year > 1) {
-    s0_offset ~ normal(0, sigma_s0_vec[1]); 
+    s0_logit ~ normal(logit(implied_s0), sigma_s0_vec[1]); 
     sigma_s0_vec ~ normal(0, 1.0);
   } else {
-    s0_offset ~ normal(0, 5.0); // Non-hierarchical broad prior
+    s0_logit ~ normal(logit(implied_s0), 5.0); // Centered prior
   }
   beta_s0 ~ normal(0, prior_sigma_beta_s0);
 
