@@ -42,7 +42,7 @@ simdata <- simdata %>%
     marginInv = 1 / margin,
     loan_rate = 0
   ) %>%
-  filter(year == 1960) %>% # SINGLE YEAR ONLY
+  # filter(year == 1960) %>% # MULTI-YEAR TEST: Commented out
   droplevels() %>%
   filter(is.finite(marginInv) & margin > 0) %>%
   filter(margin >= 0.1) # Surgical Outlier Removal
@@ -151,19 +151,19 @@ sdata_template <- list(
   X_s0 = matrix(0, nlevels(simdata$year), 0),
   grainsize = 1,
 
-  # --- SINGLE MARKET SINGLE PERIOD ---
-  is_single_market = 1L, # 1960 Only
-  use_rho = 0L,
+  # --- DYNAMIC: Auto-detect Single vs Multi Market-Year ---
+  is_single_market = as.integer(is_single), # TRUE only if n_yrs == 1
+  use_rho = as.integer(!is_single), # Enable correlation for panel data
 
-  # Structural Constraints
-  fix_supply_intercept = 1L,
+  # Structural Constraints (only fix intercept for true single market)
+  fix_supply_intercept = as.integer(is_single),
   use_hmt = 0L,
   avg_price_hmt = mean(simdata$rate_deposits),
   avg_margin_hmt = mean(simdata$margin),
   ssnip_hmt = 0.05,
 
   # --- PRIOR SCALES ---
-  # Tightened for Absolute Share Errors (matching bayesian.stan)
+  # Tight share prior for identification; loose margin prior for flexibility
   prior_sigma_share = 0.01,
   prior_sigma_margin = 1.0,
   prior_sigma_meanval_strat = 1.0,
@@ -233,7 +233,7 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
   cat(msg)
   results <- list()
 
-  for (m in 1:1) {
+  for (m in 1:1) { # TEST: Bertrand only
     model_name <- models[m]
     
     cat("\n")
@@ -244,7 +244,7 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
     cat("\n")
 
     sdata$supply_model <- as.integer(m)
-    sdata$use_cutoff <- 0L # DISABLED for all models
+    sdata$use_cutoff <- 0L # DISABLE Strategic Cutoff (Base Models)
 
     # Calculate Model-Specific Prior (Calibration Mode)
     # This aligns the prior with the FOCs of each model (Bertrand vs Auction)
@@ -255,10 +255,18 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
 
 
     init_fun <- function() {
-      list(
-        s0_logit = as.array(rep(qlogis(0.02), sdata$N_market_year)),
+      s0_start <- qlogis(pmax(0.015, sdata$implied_s0))
+      init_list <- list(
+        s0_logit = as.array(s0_start),
         mu_log_a = log(sdata$prior_alpha_mean)
       )
+      # Only initialize hierarchical params when is_single_market = 0
+      if (!is_single) {
+        init_list$sigma_log_a_vec = array(0.5, 1)
+        init_list$mu_b_event_vec = array(0.0, 1)
+        init_list$sigma_b_event_vec = array(0.5, 1)
+      }
+      init_list
     }
 
     fit <- sampling(
@@ -268,6 +276,7 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
       init = init_fun,
       control = list(adapt_delta = adapt_delta, max_treedepth = 15)
     )
+    saveRDS(fit, file.path(resultsdir, paste0("pnb_fit_", model_name, ".rds")))
 
     # Diagnostics
     sampler_params <- get_sampler_params(fit, inc_warmup = FALSE)
@@ -426,8 +435,5 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
 
 # --- EXECUTE BATCHES ---
 
-# 3. Fixed Supply Intercept Run (Strict Structural)
-sdata_fixed <- sdata_template
-sdata_fixed$fix_supply_intercept <- 1L
-# min_s0 is already set in sdata_template from data
-run_batch(sdata_fixed, "_fixed")
+# Multi-Year Test: Bertrand with higher adapt_delta
+run_batch(sdata_template, "_multiyear_test", adapt_delta = 0.98)
