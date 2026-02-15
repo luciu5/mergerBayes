@@ -1,218 +1,258 @@
-# ---- Load Libraries ----
+# ---- Merger Effects Simulation ----
+# Loads Stan fits and computes predicted price effects using 'antitrust' package
+# Two approaches compared:
+#   1. Bayesian: use posterior draws of alpha and s0 from hierarchical model
+#   2. Calibration: use bertrand.alm() which calibrates alpha from observed data
+
+rm(list = ls())
+
 library(dplyr)
 library(tidyr)
+library(rstan)
 library(antitrust)
-library(jsonlite)
-library(parallel)
+library(readr)
 
 # Configuration
-datadir <- "data"
-resdir <- "results"
-if (!dir.exists(resdir)) dir.create(resdir, recursive = TRUE)
+directory <- "d:/Projects/mergerBayes"
+datadir <- file.path(directory, "data")
+resultsdir <- file.path(directory, "results")
+if (!dir.exists(resultsdir)) dir.create(resultsdir, recursive = TRUE)
 
-# Load merger data
-load(file.path(datadir, "banksimdata.RData"))
+N_DRAWS <- 200
 
-# Filter for 2020 and specific 10 mergers (MATCHING BAYESIAN.R)
-simdata <- simdata %>% filter(year == 2020)
-target_events <- c(2117, 2086, 2096, 2069, 2178, 2144, 2164, 2139, 2173, 2047)
-simdata <- simdata %>% filter(event_id %in% target_events)
+# Load Data
+load(file.path(datadir, "supreme_data.RData"))
 
-# Clean and process data EXACTLY as in bayesian.R
+# Load merger event info (target + acquirer per event)
+load("d:/Projects/supreme_eff/data/event_overlaps.Rdata") # loads 'events', 'overlaps', 'ownership'
+cat("Merger events loaded from event_overlaps.Rdata\n")
+
+# Prepare data: same filtering as pnb.R
+# Exclude Provident (3) and Houston (4)
 simdata <- simdata %>%
-    filter(deposit_share > 0) %>%
-    mutate(
-        # Unique market identifier (event_id + fedmkt)
-        event_mkt = interaction(event_id, fedmkt, drop = TRUE),
-        tophold = factor(tophold),
-        year = factor(year),
-        # Map variables to names used in bayesian.R/stan
-        shareIn = deposit_share,
-        margin = selected_margin / 100,
-        rate_deposits = rate_call_report / 100
-    ) %>%
-    mutate(margin = ifelse(margin <= 0, NA, margin)) %>%
-    filter(!is.na(margin)) %>%
-    mutate(
-        event_mkt = droplevels(event_mkt),
-        tophold = droplevels(tophold),
-        year = droplevels(year)
-    ) %>%
-    arrange(event_mkt, year, tophold)
+  filter(!event_id %in% c(3, 4)) %>%
+  droplevels() %>%
+  mutate(
+    event = factor(event_id),
+    tophold = factor(tophold),
+    marginInv = 1 / margin,
+    loan_rate = 0
+  ) %>%
+  filter(is.finite(marginInv) & margin > 0) %>%
+  filter(margin >= 0.1) %>%
+  group_by(event) %>%
+  filter(as.numeric(as.character(year)) == min(as.numeric(as.character(year)))) %>%
+  ungroup() %>%
+  mutate(year = factor(year)) %>%
+  droplevels()
 
-# Calculate scaling stats (must match bayesian.R)
-rate_mean <- mean(simdata$rate_deposits, na.rm = TRUE)
-rate_sd <- sd(simdata$rate_deposits, na.rm = TRUE)
+# Rescale shares to sum to 1 within each event-year (conditional shares)
+simdata <- simdata %>%
+  group_by(event, year) %>%
+  mutate(shareIn = shareIn / sum(shareIn)) %>%
+  ungroup()
 
-# Models to process for simulation
-# Note: moncom excluded from simulation since it predicts zero price effects
-models <- c("bertrand", "cournot", "2nd")
+# Calculate rate_sd for scaling alpha (consistent with Stan model)
+rate_sd <- sd(simdata$rate_deposits)
+cat("Rate SD (for alpha scaling):", rate_sd, "\n")
 
-# Main processing loop
-for (m_name in models) {
-    cat("\nProcessing model:", m_name, "\n")
+event_levels <- levels(simdata$event)
+cat("Events:", paste(event_levels, collapse = ", "), "\n")
 
-    # Try new location first (results/), fallback to old (data/)
-    outfile <- file.path(resdir, paste0("stan_hhiperform_", m_name, ".RData"))
-    if (!file.exists(outfile)) {
-        outfile <- file.path(datadir, paste0("stan_hhiperform_", m_name, ".RData"))
-    }
+# ---- Bayesian simulation for one event ----
+simulate_bayesian <- function(edata, draws, event_idx, mky_idx, eid, rate_sd) {
+  # Filter events table for current event to get target/acquirer IDs
+  ev <- events %>% filter(event_id == as.integer(eid))
+  if (nrow(ev) != 1) stop(paste("Event info not found for ID:", eid))
+  
+  # Map IDs (rssdid) to indices in the current edata partition
+  # Assuming edata$tophold corresponds to rssdid
+  target_id <- ev$target   
+  acquirer_id <- ev$acquirer
+  
+  target_idx <- which(as.numeric(as.character(edata$tophold)) == target_id)
+  acquirer_idx <- which(as.numeric(as.character(edata$tophold)) == acquirer_id)
+  
+  # Construct Ownership Matrices
+  n_firms <- nrow(edata)
+  ownerPre <- diag(n_firms)
+  ownerPost <- ownerPre
+  
+  # Merge if both parties are present in this market simulation
+  if (length(target_idx) == 1 && length(acquirer_idx) == 1) {
+    ownerPost[target_idx, acquirer_idx] <- 1
+    ownerPost[acquirer_idx, target_idx] <- 1
+  } else {
+    # If one party was filtered out (e.g. < 0.1% share), the merger has no effect in this model
+    # We proceed with ownerPost = ownerPre (no price change expected from ownership)
+    # But alpha/s0 draws might still imply different elasticities than calibration.
+    missing_party <- c()
+    if (length(target_idx) == 0) missing_party <- c(missing_party, paste("Target", target_id))
+    if (length(acquirer_idx) == 0) missing_party <- c(missing_party, paste("Acquirer", acquirer_id))
+    cat(sprintf("[Note: %s filtered out] ", paste(missing_party, collapse=", ")))
+  }
 
-    if (!file.exists(outfile)) {
-        cat("  Skip: Result file not found.\n")
-        next
-    }
+  n_total <- length(draws$lp__)
+  set.seed(42)
+  idx <- sample(seq_len(n_total), min(N_DRAWS, n_total))
 
-    # Load Stan results
-    cat("  Loading Stan results...\n")
-    load(outfile)
+  prices <- as.numeric(edata$rate_deposits)
+  shares_cond <- as.numeric(edata$shareIn)
 
-    # Handle both new compact format (posteriors) and legacy format (fit)
-    if (exists("posteriors")) {
-        cat("  Using compact format (posteriors list)\n")
-        draws <- posteriors
-        n_draws <- nrow(draws$a_event)
-    } else if (exists("fit")) {
-        cat("  Using legacy format (fit object)\n")
-        draws <- rstan::extract(fit)
-        n_draws <- length(draws$lp__)
-    } else {
-        cat("  ERROR: Neither 'posteriors' nor 'fit' found in file!\n")
-        next
-    }
-    cat("  N draws found:", n_draws, "\n")
+  first_error <- NULL
+  results <- vapply(idx, function(i) {
+    alpha_raw <- draws$a_event[i, event_idx]
+    # Stan alpha is on standardized prices, so scale it to raw prices
+    alpha <- alpha_raw / rate_sd
+    
+    s0 <- plogis(draws$s0_logit[i, mky_idx])
 
-    # Market levels from simdata (must match Stan order)
-    event_levels <- levels(simdata$event_mkt)
-    n_events <- length(event_levels)
+    # Unconditional shares
+    shares_uncond <- shares_cond * (1 - s0)
 
-    # Determine subset of draws for effect distribution (e.g. 50 draws for speed)
-    # Production might use more (e.g. 1000)
-    set.seed(42)
-    draw_subset <- sample(1:n_draws, min(50, n_draws))
+    # Supply-side Utility: U = delta + alpha * P  (alpha > 0)
+    # Inversion: delta = log(shares_uncond) - log(s0) - alpha * prices
+    meanval <- log(shares_uncond) - log(s0) - alpha * prices
 
-    # Map supply type
-    supply_type <- ifelse(m_name == "2nd", "auction", m_name)
+    res <- tryCatch(
+      sim(
+        prices = prices,
+        supply = "bertrand",
+        demand = "Logit",
+        output = FALSE, # Supply-side simulation (Deposits)
+        demand.param = list(alpha = alpha, meanval = meanval), # Positive alpha
+        ownerPre = ownerPre,
+        ownerPost = ownerPost
+      ),
+      error = function(e) {
+        if (is.null(first_error)) first_error <<- conditionMessage(e)
+        NULL
+      }
+    )
 
-    # List to store all results
-    all_results <- list()
+    if (is.null(res)) return(NA_real_)
+    chg <- (res@pricePost / res@pricePre) - 1
+    sum(chg * shares_cond)
+  }, numeric(1))
 
-    cat("  Computing effects for each market and sampled draw...\n")
+  if (!is.null(first_error) && sum(is.na(results)) > 0) {
+    cat(sprintf("\n    [%d failures, first error: %s]\n    ", sum(is.na(results)), first_error))
+  }
 
-    # Loop over markets
-    for (e_idx in seq_along(event_levels)) {
-        e_name <- event_levels[e_idx]
-        e_data <- simdata %>% filter(event_mkt == e_name)
-
-        # Identify merging parties
-        isParty <- e_data$isParty
-        if (sum(isParty) < 2) next # Skip if not a merger
-
-        # Ownership matrices
-        ownerPre <- diag(nrow(e_data))
-        ownerPost <- ownerPre
-        party_indices <- which(isParty)
-        ownerPost[party_indices[1], party_indices[2]] <- 1
-        ownerPost[party_indices[2], party_indices[1]] <- 1
-
-        # Bank-specific tophold indices
-        tophold_indices <- as.integer(e_data$tophold)
-
-        # Year index (assuming same year per market event)
-        year_index <- as.integer(e_data$year[1])
-
-        # Subset draws results for this market
-        market_draw_results <- lapply(draw_subset, function(d_idx) {
-            # Robust indexing helper
-            get_val <- function(draw_arr, d, i) {
-                if (is.matrix(draw_arr)) {
-                    return(draw_arr[d, i])
-                }
-                # For vectors (like year_effect_demand when N_year=1), just use d
-                return(draw_arr[d])
-            }
-
-            # price coefficient (rescaled)
-            alpha_stan <- draws$a_event[d_idx, e_idx]
-            alpha_sim <- alpha_stan / rate_sd
-
-            # Fixed effects + s0 - alpha * mean_p / sd_p
-            fe <- draws$b_event[d_idx, e_idx] +
-                draws$b_tophold_scaled[d_idx, tophold_indices] +
-                get_val(draws$year_effect_demand, d_idx, year_index) +
-                draws$s0[d_idx, e_idx]
-
-            meanval_sim <- fe - alpha_stan * rate_mean / rate_sd
-
-            # Sim parameters
-            dp <- list(
-                alpha = alpha_sim,
-                meanval = as.vector(meanval_sim)
-            )
-
-            # Run simulation
-            # Note: auction models don't accept 'output' argument
-            sim_args <- list(
-                prices = e_data$rate_deposits,
-                supply = supply_type,
-                demand = "Logit",
-                demand.param = dp,
-                ownerPre = ownerPre,
-                ownerPost = ownerPost,
-                labels = as.character(e_data$tophold)
-            )
-
-            # Add output argument only for bertrand/cournot
-            if (supply_type %in% c("bertrand", "cournot")) {
-                sim_args$output <- FALSE
-            }
-
-            res <- try(do.call(sim, sim_args), silent = TRUE)
-
-            if (inherits(res, "try-error")) {
-                return(NULL)
-            }
-
-            # Extract values explicitly
-            price_pre <- res@pricePre
-            price_post <- res@pricePost
-            shares_pre <- calcShares(res, preMerger = TRUE)
-
-            # Industry price change (share-weighted)
-            ind_change <- sum((price_post / price_pre - 1) * shares_pre) * 100
-
-            # Merging party price change
-            party_share_pre <- sum(shares_pre[party_indices])
-            party_change <- sum((price_post[party_indices] / price_pre[party_indices] - 1) * shares_pre[party_indices]) / party_share_pre * 100
-
-            # Consumer Harm (Compensating Variation)
-            harm <- try(CV(res), silent = TRUE)
-            if (inherits(harm, "try-error")) harm <- NA
-
-            return(data.frame(
-                market = e_name,
-                draw = d_idx,
-                industry_price_change = ind_change,
-                party_price_change = party_change,
-                consumer_harm = harm
-            ))
-        })
-
-        all_results[[e_idx]] <- bind_rows(market_draw_results)
-
-        if (e_idx %% 50 == 0) cat(sprintf("    Processed %d/%d markets...\n", e_idx, n_events))
-    }
-
-    # Finalize model results
-    model_results <- bind_rows(all_results)
-    model_results$supply_model <- m_name
-
-    saveRDS(model_results, file = file.path(resdir, paste0("effects_distribution_", m_name, ".rds")))
-    cat("  Saved results to results/effects_distribution_", m_name, ".rds\n")
-
-    # Cleanup memory - handle both formats
-    rm(list = intersect(c("fit", "posteriors", "loo_result", "bridge", "fit_sum", "plot_sum", "stan_data", "draws", "model_results", "all_results"), ls()))
-    gc()
+  results
 }
 
-cat("\nAll post-merger effect distributions computed!\n")
+# ---- Calibration simulation for one event ----
+simulate_calibration <- function(edata, eid) {
+  # Filter events table for current event to get target/acquirer IDs
+  ev <- events %>% filter(event_id == as.integer(eid))
+  target_id <- ev$target   
+  acquirer_id <- ev$acquirer
+  
+  target_idx <- which(as.numeric(as.character(edata$tophold)) == target_id)
+  acquirer_idx <- which(as.numeric(as.character(edata$tophold)) == acquirer_id)
+  
+  n_firms <- nrow(edata)
+  ownerPre <- diag(n_firms)
+  ownerPost <- ownerPre
+  
+  if (length(target_idx) == 1 && length(acquirer_idx) == 1) {
+    ownerPost[target_idx, acquirer_idx] <- 1
+    ownerPost[acquirer_idx, target_idx] <- 1
+  }
+
+  res <- tryCatch(
+    bertrand.alm(
+      demand = "logit",
+      prices = as.numeric(edata$rate_deposits),
+      quantities = as.numeric(edata$shareIn),
+      margins = as.numeric(edata$margin),
+      ownerPre = ownerPre,
+      ownerPost = ownerPost,
+      labels = as.character(edata$tophold),
+      output = FALSE
+    ),
+    error = function(e) { cat("error:", conditionMessage(e), "\n"); NULL }
+  )
+
+  if (is.null(res)) return(list(price_change = NA, alpha = NA, s0 = NA))
+
+  chg <- (res@pricePost / res@pricePre) - 1
+  avg_chg <- sum(chg * as.numeric(edata$shareIn))
+
+  cal_alpha <- abs(res@slopes$alpha)
+  cal_s0 <- 1 - sum(res@shares)
+
+  list(price_change = avg_chg, alpha = cal_alpha, s0 = cal_s0)
+}
+
+# ---- Main loop ----
+all_results <- list()
+
+# 1. Bayesian approach (from fit files)
+models <- c("Bertrand")
+for (model_name in models) {
+  fit_file <- file.path(resultsdir, paste0("pnb_fit_", model_name, ".rds"))
+  if (!file.exists(fit_file)) {
+    cat("Skipping", model_name, "- no fit file\n")
+    next
+  }
+
+  cat("Loading fit:", model_name, "\n")
+  fit <- readRDS(fit_file)
+  draws <- rstan::extract(fit)
+
+  for (e in seq_along(event_levels)) {
+    eid <- event_levels[e]
+    edata <- simdata %>% filter(event == eid)
+
+    cat(sprintf("  Bayesian Event %s (%d firms): ", eid, nrow(edata)))
+    price_changes <- simulate_bayesian(edata, draws, e, e, eid, rate_sd)
+
+    valid <- price_changes[!is.na(price_changes)]
+    if (length(valid) > 0) {
+      cat(sprintf("%.4f (%.4f) [%d/%d valid]\n", mean(valid), sd(valid), length(valid), N_DRAWS))
+    } else {
+      cat(sprintf("ALL FAILED [0/%d valid]\n", N_DRAWS))
+    }
+
+    all_results[[length(all_results) + 1]] <- data.frame(
+      Event = as.integer(eid),
+      Method = "Bayesian",
+      N_Firms = nrow(edata),
+      Mean_Price_Change = if (length(valid) > 0) mean(valid) else NA,
+      SD_Price_Change = if (length(valid) > 1) sd(valid) else NA,
+      N_Valid = length(valid)
+    )
+  }
+
+  rm(fit, draws)
+  gc()
+}
+
+# 2. Calibration approach (no fit needed)
+cat("\n--- Calibration (bertrand.alm) ---\n")
+for (e in seq_along(event_levels)) {
+  eid <- event_levels[e]
+  edata <- simdata %>% filter(event == eid)
+
+  cat(sprintf("  Calibration Event %s (%d firms): ", eid, nrow(edata)))
+  cal <- simulate_calibration(edata, eid)
+  cat(sprintf("%.4f (alpha=%.3f, s0=%.3f)\n", cal$price_change, cal$alpha, cal$s0))
+
+  all_results[[length(all_results) + 1]] <- data.frame(
+    Event = as.integer(eid),
+    Method = "Calibration",
+    N_Firms = nrow(edata),
+    Mean_Price_Change = cal$price_change,
+    SD_Price_Change = NA,
+    N_Valid = 1
+  )
+}
+
+# ---- Save results ----
+effects_summary <- bind_rows(all_results)
+cat("\n=== Results ===\n")
+print(effects_summary)
+write_csv(effects_summary, file.path(resultsdir, "pnb_effects_summary.csv"))
+cat("\nSaved:", file.path(resultsdir, "pnb_effects_summary.csv"), "\n")

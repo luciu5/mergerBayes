@@ -93,7 +93,7 @@ data {
   int<lower=0, upper=1> is_single_market;  
   int<lower=0, upper=1> use_rho; 
   int<lower=0, upper=1> use_hmt;
-  int<lower=0, upper=1> fix_supply_intercept; 
+  // fix_supply_intercept REMOVED: behavior controlled by is_single_market
   real avg_price_hmt; 
   real avg_margin_hmt; 
   real ssnip_hmt;   
@@ -208,7 +208,7 @@ model {
   if (is_single_market == 1) {
     // No prior needed for sigma_log_a
   } else {
-    sigma_log_a_vec ~ normal(0, 0.5); 
+    sigma_log_a_vec ~ normal(0, prior_sigma_alpha);
     r_event_a_raw ~ std_normal();
     mu_b_event_vec ~ normal(0, 1.0); 
     b_event_raw ~ std_normal();
@@ -239,7 +239,7 @@ model {
     sigma_year_s0 ~ normal(0, 1.0);
   }  
   if (use_rho == 1) {
-    rho_param ~ uniform(-1, 1); // Equivalent to LKJ(1) for 2x2
+    target += (prior_lkj - 1) * log1m(square(rho_param[1])); // LKJ(prior_lkj) for 2x2 correlation
   }
   sigma_share ~ normal(0, prior_sigma_share); 
   sigma_margin ~ normal(0, prior_sigma_margin); 

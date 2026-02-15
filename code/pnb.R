@@ -31,35 +31,47 @@ if (!dir.exists(resultsdir)) dir.create(resultsdir, recursive = TRUE)
 cat("Loading PNB Data from:", datafile, "\n")
 load(datafile) # Loads 'simdata'
 
-# PNB PANEL: All Years (1960-1965) as Separate Markets
+# MULTI-EVENT: All merger events, one year per event (earliest available)
+# Exclude Provident (3) and Houston (4): Provident has near-zero alpha,
+# Houston (72 firms) causes non-finite values in merger simulation.
 simdata <- simdata %>%
-  filter(event_id == 1) %>% # PNB Case Only
+  filter(!event_id %in% c(3, 4)) %>%
   droplevels() %>%
   mutate(
-    event_mkt = year,
+    event = factor(event_id),
     tophold = factor(tophold),
-    year = factor(year),
     marginInv = 1 / margin,
     loan_rate = 0
   ) %>%
-  # filter(year == 1960) %>% # MULTI-YEAR TEST: Commented out
-  droplevels() %>%
   filter(is.finite(marginInv) & margin > 0) %>%
-  filter(margin >= 0.1) # Surgical Outlier Removal
+  filter(margin >= 0.1) %>% # Surgical Outlier Removal
+  # Keep only one year per event (earliest year) - year is still numeric here
+  group_by(event) %>%
+  filter(as.numeric(as.character(year)) == min(as.numeric(as.character(year)))) %>%
+  ungroup() %>%
+  mutate(
+    event_mkt = paste0("event", event_id, "_", year),
+    year = factor(year)
+  ) %>%
+  droplevels()
 
-cat("Filtered PNB Panel Data (All Years, Margin >= 0.1):", nrow(simdata), "observations\n")
-cat("Years (Markets):", paste(levels(simdata$year), collapse = ", "), "\n")
+n_events <- nlevels(simdata$event)
 n_yrs <- nlevels(simdata$year)
-cat("N Markets:", n_yrs, "\n")
-is_single <- (n_yrs == 1)
+is_single <- (n_events == 1 && n_yrs == 1)
+
+cat("Filtered Multi-Event Data (1 year per event, Margin >= 0.1):", nrow(simdata), "observations\n")
+cat("Events:", paste(levels(simdata$event), collapse = ", "), "\n")
+cat("Year per event:\n")
+print(simdata %>% group_by(event) %>% summarise(year = first(as.character(year)), n_firms = n(), .groups = "drop"))
+cat("N Events:", n_events, "| N Years:", n_yrs, "| is_single:", is_single, "\n")
 
 # --- FRINGE SHARE ADJUSTMENT ---
 # Remove firms < 1% share and add their total share to the lower bound of Outside Option
 FRANGE_THRESH <- 0.0 # Keep all for Cutoff Analysis
 
-# Calculate fringe share per market
+# Calculate fringe share per event-year
 fringe_shares <- simdata %>%
-  group_by(event_mkt) %>%
+  group_by(event, year) %>%
   summarise(
     fringe_share = sum(shareIn[shareIn < FRANGE_THRESH]),
     .groups = "drop"
@@ -72,12 +84,12 @@ simdata <- simdata %>%
 
 # Calculate the 'Missing' outside share from the raw data (0.5% floor for stability)
 min_s0_data <- simdata %>%
-  group_by(year) %>%
+  group_by(event, year) %>%
   summarise(min_s0 = pmax(0.005, 1 - sum(shareIn)), .groups = "drop")
 
 # RESCALE SHARES forces sum to 1.0 (Conditional Shares)
 simdata <- simdata %>%
-  group_by(event_mkt, year) %>%
+  group_by(event, year) %>%
   mutate(shareIn = shareIn / sum(shareIn)) %>%
   ungroup()
 
@@ -123,14 +135,12 @@ sdata_template <- list(
   rateDiff = (simdata$rate_deposits - mean(simdata$rate_deposits)) / sd(simdata$rate_deposits),
   rateDiff_sd = sd(simdata$rate_deposits),
   # log_assets REMOVED
-  N_event = 1,
-  event = rep(1L, nrow(simdata)),
+  N_event = nlevels(simdata$event),
+  event = as.integer(simdata$event),
   N_tophold = nlevels(simdata$tophold),
   tophold = as.integer(simdata$tophold),
 
-  # Covariates - ASSETS REMOVED (Replaced by Random Effects)
-  log_deposits = as.array(0.0),
-  # REMOVED log_assets
+  # Covariates (placeholder)
 
   # rateDiff_sd already set above
   N_year = nlevels(simdata$year),
@@ -142,21 +152,27 @@ sdata_template <- list(
 
   # HIERARCHICAL S0 DATA
   # Mapping: market_year -> (event, year)
-  N_market_year = nlevels(simdata$year),
-  market_year_idx = as.integer(simdata$year),
-  mky_to_event = as.array(rep(1L, nlevels(simdata$year))), # All same event (PNB)
-  mky_to_year = as.array(seq_len(nlevels(simdata$year))),  # Year index
+  # Each event has one year, so market_year_idx = event index
+  N_market_year = nlevels(interaction(simdata$event, simdata$year, drop=TRUE)),
+  market_year_idx = as.integer(interaction(simdata$event, simdata$year, drop=TRUE)),
+  mky_to_event = {
+    mky_map <- simdata %>% distinct(event, year) %>% arrange(interaction(event, year, drop=TRUE))
+    as.array(as.integer(mky_map$event))
+  },
+  mky_to_year = {
+    mky_map <- simdata %>% distinct(event, year) %>% arrange(interaction(event, year, drop=TRUE))
+    as.array(as.integer(mky_map$year))
+  },
 
-  K_s0 = 0L, # No covariates for single-market case
-  X_s0 = matrix(0, nlevels(simdata$year), 0),
+  K_s0 = 0L, # No covariates for now
+  X_s0 = matrix(0, nlevels(interaction(simdata$event, simdata$year, drop=TRUE)), 0),
   grainsize = 1,
 
   # --- DYNAMIC: Auto-detect Single vs Multi Market-Year ---
   is_single_market = as.integer(is_single), # TRUE only if n_yrs == 1
   use_rho = as.integer(!is_single), # Enable correlation for panel data
 
-  # Structural Constraints (only fix intercept for true single market)
-  fix_supply_intercept = as.integer(is_single),
+  # Structural Constraints
   use_hmt = 0L,
   avg_price_hmt = mean(simdata$rate_deposits),
   avg_margin_hmt = mean(simdata$margin),
@@ -175,7 +191,7 @@ sdata_template <- list(
   # Hierarchical Priors
   prior_sigma_alpha = 1.0,
   prior_sigma_beta_s0 = 1.0,
-  prior_lkj = 2.0,
+  prior_lkj = 4.0, # LKJ(4): concentrated around rho=0
 
   implied_s0 = as.array(min_s0_data$min_s0)
 )
@@ -224,11 +240,11 @@ get_alpha_prior <- function(model_name, data) {
 # --- BATCH EXECUTION FUNCTION ---
 run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
   hmt_status <- if (sdata$use_hmt == 1) "HMT-Constrained" else "Unconstrained"
-  intercept_status <- if (sdata$fix_supply_intercept == 1) "Fixed-Intercept" else "Free-Intercept"
-  
+  mkt_status <- if (sdata$is_single_market == 1) "Single-Market" else "Hierarchical"
+
   msg <- sprintf(
     "\n\n>>> STARTING BATCH: %s [%s, %s] <<<\n",
-    suffix, hmt_status, intercept_status
+    suffix, hmt_status, mkt_status
   )
   cat(msg)
   results <- list()
@@ -435,5 +451,5 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
 
 # --- EXECUTE BATCHES ---
 
-# Multi-Year Test: Bertrand with higher adapt_delta
-run_batch(sdata_template, "_multiyear_test", adapt_delta = 0.98)
+# Single-Year Multi-Event Test: All events in 1960, Bertrand only
+run_batch(sdata_template, "_1960_multievent", adapt_delta = 0.98)
