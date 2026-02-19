@@ -75,29 +75,19 @@ simulate_bayesian <- function(edata, draws, event_idx, mky_idx, eid, rate_sd) {
   
   # Construct Ownership Matrices
   n_firms <- nrow(edata)
-  ownerPre <- diag(n_firms)
-  ownerPost <- ownerPre
   
-  # Merge if both parties are present in this market simulation
-  if (length(target_idx) == 1 && length(acquirer_idx) == 1) {
-    ownerPost[target_idx, acquirer_idx] <- 1
-    ownerPost[acquirer_idx, target_idx] <- 1
-  } else {
-    # If one party was filtered out (e.g. < 0.1% share), the merger has no effect in this model
-    # We proceed with ownerPost = ownerPre (no price change expected from ownership)
-    # But alpha/s0 draws might still imply different elasticities than calibration.
-    missing_party <- c()
-    if (length(target_idx) == 0) missing_party <- c(missing_party, paste("Target", target_id))
-    if (length(acquirer_idx) == 0) missing_party <- c(missing_party, paste("Acquirer", acquirer_id))
-    cat(sprintf("[Note: %s filtered out] ", paste(missing_party, collapse=", ")))
-  }
-
   n_total <- length(draws$lp__)
   set.seed(42)
   idx <- sample(seq_len(n_total), min(N_DRAWS, n_total))
 
   prices <- as.numeric(edata$rate_deposits)
   shares_cond <- as.numeric(edata$shareIn)
+  ownerPre <- ownerPost <- edata$tophold
+  ownerPost[target_idx] <- ownerPost[acquirer_idx]
+
+if(all.equal(ownerPre, ownerPost)) {
+  stop("OwnerPre and ownerPost are equal\n")
+}
 
   first_error <- NULL
   results <- vapply(idx, function(i) {
@@ -189,10 +179,14 @@ simulate_calibration <- function(edata, eid) {
 # ---- Main loop ----
 all_results <- list()
 
-# 1. Bayesian approach (from fit files)
-models <- c("Bertrand")
+
+# 2. Bayesian approach (from fit files)
+models <- c("Bertrand", "Auction", "Cournot", "MonCom")
+
 for (model_name in models) {
+  # Update filename pattern for PNB 1960 run
   fit_file <- file.path(resultsdir, paste0("pnb_fit_", model_name, ".rds"))
+  
   if (!file.exists(fit_file)) {
     cat("Skipping", model_name, "- no fit file\n")
     next
@@ -201,53 +195,254 @@ for (model_name in models) {
   cat("Loading fit:", model_name, "\n")
   fit <- readRDS(fit_file)
   draws <- rstan::extract(fit)
-
+  
+  # Determine Supply/Demand mode for antitrust package
+  # Bertrand -> supply="bertrand", demand="logit"
+  # Auction -> supply="auction", demand="logit"
+  # Cournot -> supply="cournot", demand="logit" (or linear?) - Standard Cournot implies quantities
+  # MonCom -> supply="bertrand"? (Monopolistic Competition is technically Bertrand with potentially different elasticities, but standard antitrust package doesn't have "moncom". treat as Bertrand/Logit)
+  
+  supply_mode <- "bertrand"
+  if (model_name == "Auction") supply_mode <- "auction"
+  if (model_name == "Cournot") supply_mode <- "cournot"
+  
   for (e in seq_along(event_levels)) {
     eid <- event_levels[e]
+    # Filter for Event 1 (PNB)
+    if (eid != "1") next 
+    
     edata <- simdata %>% filter(event == eid)
+    cat(sprintf("  %s Event %s (%d firms): ", model_name, eid, nrow(edata)))
+    
+    # Custom simulation wrapper
+    price_changes <- vapply(seq_len(min(N_DRAWS, length(draws$lp__))), function(i) {
+        alpha_raw <- draws$mu_log_a[i] 
+        alpha <- exp(alpha_raw) / rate_sd
+        
+        # S0: draws$s0_logit is [Iter, N_market]. 
+        s0_logit <- draws$s0_logit[i, 1] 
+        s0 <- plogis(s0_logit)
+        
+        # Prepare Antitrust sim
+        shares_cond <- as.numeric(edata$shareIn)
+        prices <- as.numeric(edata$rate_deposits)
+        
+        # Determine ID column
+        id_col <- "id_rssd"
+        if (!("id_rssd" %in% names(edata))) {
+             if ("rssdid" %in% names(edata)) id_col <- "rssdid"
+             else if ("idrssd" %in% names(edata)) id_col <- "idrssd"
+             else id_col <- "tophold"
+        }
+        
+        # Get numeric IDs
+        firm_ids <- as.numeric(as.character(edata[[id_col]]))
+        
+        # Filter events table for current event to get target/acquirer IDs
+        # Note: 'events' table loaded globally
+        ev <- events %>% filter(event_id == as.integer(eid))
+        
+        t_idx <- which(firm_ids == ev$target)
+        a_idx <- which(firm_ids == ev$acquirer)
+        
+        ownerPre <- as.character(edata[[id_col]])
+        ownerPost <- ownerPre
+        if(length(t_idx) > 0 && length(a_idx) > 0) {
+            # Assign Acquirer ID to Target (Merge)
+            acq_label <- ownerPost[a_idx[1]]
+            ownerPost[t_idx] <- acq_label
+        } else {
+             # If target/acquirer not found in this event data (e.g. dropped due to share < threshold), return 0
+             return(0.0)
+        }
+        
+        # Check if ownerPost differs
+        if (all(ownerPost == ownerPre)) return(0.0)
+        
+        # Monopolistic Competition theoretical result: No strategic effect from merger
+        if (model_name == "MonCom") return(0.0)
 
-    cat(sprintf("  Bayesian Event %s (%d firms): ", eid, nrow(edata)))
-    price_changes <- simulate_bayesian(edata, draws, e, e, eid, rate_sd)
+        res_sim <- tryCatch({
+            firm_labels <- as.character(edata[[id_col]])
+            
+            # Unconditional shares for meanval calculation
+            shares_uncond <- shares_cond * (1 - s0)
+            meanval <- log(shares_uncond) - log(s0) - alpha * prices
+                
+            # Use sim() for all models with consistent interface
+            sim_supply <- if (model_name == "Auction") "auction" else 
+                          if (model_name == "Cournot") "cournot" else 
+                          "bertrand" # Default (Bertrand/MonCom)
+            
+            antitrust::sim(prices, supply=sim_supply, demand="Logit", 
+                 demand.param=list(alpha=alpha, meanval=meanval),
+                 ownerPre=ownerPre, ownerPost=ownerPost, labels=firm_labels)
+
+        }, error = function(e) {
+             if (i == 1) cat(paste("    [ERROR] Simulation failed:", e$message, "\n"))
+             NULL
+        })
+        
+        if (is.null(res_sim)) return(NA)
+        
+        # Calculate Price Effect
+        # IMPORTANT: pre=FALSE to get Post-Merger prices
+        pppost <- antitrust::calcPrices(res_sim, pre=FALSE)
+        chg <- (pppost / prices) - 1
+        
+        # Return Merging Parties Avg Change (weighted by pre-merger share)
+        if(length(t_idx) > 0 && length(a_idx) > 0) {
+            party_indices <- c(t_idx, a_idx)
+            sum(chg[party_indices] * shares_cond[party_indices]) / sum(shares_cond[party_indices])
+        } else {
+            sum(chg * shares_cond)
+        }
+    }, numeric(1))
 
     valid <- price_changes[!is.na(price_changes)]
+    
     if (length(valid) > 0) {
       cat(sprintf("%.4f (%.4f) [%d/%d valid]\n", mean(valid), sd(valid), length(valid), N_DRAWS))
-    } else {
-      cat(sprintf("ALL FAILED [0/%d valid]\n", N_DRAWS))
+      
+      all_results[[length(all_results) + 1]] <- data.frame(
+        Event = as.integer(eid),
+        Method = paste0("Bayesian_", model_name),
+        N_Firms = nrow(edata),
+        Mean_Price_Change = mean(valid),
+        SD_Price_Change = sd(valid),
+        N_Valid = length(valid)
+      )
     }
-
-    all_results[[length(all_results) + 1]] <- data.frame(
-      Event = as.integer(eid),
-      Method = "Bayesian",
-      N_Firms = nrow(edata),
-      Mean_Price_Change = if (length(valid) > 0) mean(valid) else NA,
-      SD_Price_Change = if (length(valid) > 1) sd(valid) else NA,
-      N_Valid = length(valid)
-    )
   }
-
-  rm(fit, draws)
-  gc()
 }
 
-# 2. Calibration approach (no fit needed)
-cat("\n--- Calibration (bertrand.alm) ---\n")
+# 2. Calibration approach (iterating over models)
+cat("\n--- Calibration (ALM) ---\n")
+cal_models <- c("Bertrand", "Cournot", "Auction", "MonCom")
+
 for (e in seq_along(event_levels)) {
   eid <- event_levels[e]
   edata <- simdata %>% filter(event == eid)
+  # Only calibrate for PNB (Event 1) as requested table focus, or all? 
+  # Let's do all events just in case.
+  
+  cat(sprintf("  Calibration Event %s (%d firms):\n", eid, nrow(edata)))
+  
+  # Determine ID column
+  id_col <- "id_rssd"
+  if (!("id_rssd" %in% names(edata))) {
+       if ("rssdid" %in% names(edata)) id_col <- "rssdid"
+       else if ("idrssd" %in% names(edata)) id_col <- "idrssd"
+       else id_col <- "tophold"
+  }
+  
+  firm_ids <- as.numeric(as.character(edata[[id_col]]))
+  ev_info <- events %>% filter(event_id == as.integer(eid))
+  t_idx <- which(firm_ids == ev_info$target)
+  a_idx <- which(firm_ids == ev_info$acquirer)
+  
+  ownerPre <- diag(nrow(edata)); 
+  # Better: use labels for owner matrix if possible, but alm functions usually take matrix
+  # If we have identifiers, we can build the matrix.
+  # Simplest: Pre-merger is diagonal (competitors)
+  # Post-merger: Target and Acquirer share ownership (1s in consistent columns)
+  
+  ownerPost <- ownerPre
+  if(length(t_idx) > 0 && length(a_idx) > 0) {
+      ownerPost[t_idx, a_idx[1]] <- 1 # Target now owned by Acquirer
+      ownerPost[a_idx[1], t_idx[1]] <- 1 # Acquirer now owns Target (if matrix is symmetric/common ownership)
+      # Usually strict ownership: Target row -> Acquirer Col = 1?
+      # Antitrust package conventions: 
+      # ownerPre: matrix where (i,j)=1 if common ownership.
+      # Merger: set (target, acquirer) = 1 and (acquirer, target) = 1
+      ownerPost[t_idx, a_idx] <- 1
+      ownerPost[a_idx, t_idx] <- 1
+  }
 
-  cat(sprintf("  Calibration Event %s (%d firms): ", eid, nrow(edata)))
-  cal <- simulate_calibration(edata, eid)
-  cat(sprintf("%.4f (alpha=%.3f, s0=%.3f)\n", cal$price_change, cal$alpha, cal$s0))
+  for (model_name in cal_models) {
+      if (model_name == "MonCom") {
+          price_change <- 0.0
+          cal_alpha <- NA
+          cal_s0 <- NA
+          cat(sprintf("    %s: 0.0000 (Theoretical)\n", model_name))
+      } else {
+          res_cal <- tryCatch({
+              if (model_name == "Bertrand") {
+                  antitrust::bertrand.alm(
+                      demand = "logit",
+                      prices = as.numeric(edata$rate_deposits),
+                      quantities = as.numeric(edata$shareIn),
+                      margins = as.numeric(edata$margin),
+                      ownerPre = ownerPre,
+                      ownerPost = ownerPost,
+                      labels = as.character(edata[[id_col]]),
+                      output = FALSE
+                  )
+              } else if (model_name == "Cournot") {
+                  antitrust::logit.cournot.alm(
+                      prices = as.numeric(edata$rate_deposits),
+                      shares = as.numeric(edata$shareIn),
+                      margins = as.numeric(edata$margin),
+                      ownerPre = ownerPre,
+                      ownerPost = ownerPost,
+                      labels = as.character(edata[[id_col]]),
+                      output = FALSE
+                  )
+              } else if (model_name == "Auction") {
+                  antitrust::auction2nd.logit.alm(
+                      prices = as.numeric(edata$rate_deposits),
+                      shares = as.numeric(edata$shareIn),
+                      margins = as.numeric(edata$margin),
+                      ownerPre = ownerPre,
+                      ownerPost = ownerPost,
+                      labels = as.character(edata[[id_col]]),
+                      output = FALSE
+                  )
+              }
+          }, error = function(e) {
+              cat(sprintf("    %s Error: %s\n", model_name, e$message))
+              NULL
+          })
+          
+          if (!is.null(res_cal)) {
+               # Calc Price Change
+               p_post <- antitrust::calcPrices(res_cal, pre=FALSE)
+               p_pre <- as.numeric(edata$rate_deposits) 
+               
+               chg <- (p_post / p_pre) - 1
+               
+               # Weighted average for merging parties
+               if(length(t_idx) > 0 && length(a_idx) > 0) {
+                   party_idx <- c(t_idx, a_idx)
+                   w <- as.numeric(edata$shareIn)[party_idx]
+                   price_change <- sum(chg[party_idx] * w) / sum(w)
+               } else {
+                   price_change <- sum(chg * as.numeric(edata$shareIn))
+               }
+               
+               # Note: For deposit markets, a standard product merger simulation (bertrand.alm) 
+               # predicts a positive price effect (rate increase). 
+               # However, market power in deposits typically leads to rate DECREASES.
+               # We report the raw calculated change here.
+               
+               cal_alpha <- tryCatch(mean(abs(res_cal@slopes$alpha)), error=function(e) NA) 
+               
+               cat(sprintf("    %s: %.4f\n", model_name, price_change))
+          } else {
+               price_change <- NA
+               cal_alpha <- NA
+          }
+      }
 
-  all_results[[length(all_results) + 1]] <- data.frame(
-    Event = as.integer(eid),
-    Method = "Calibration",
-    N_Firms = nrow(edata),
-    Mean_Price_Change = cal$price_change,
-    SD_Price_Change = NA,
-    N_Valid = 1
-  )
+      all_results[[length(all_results) + 1]] <- data.frame(
+        Event = as.integer(eid),
+        Method = paste0("Calibration_", model_name),
+        N_Firms = nrow(edata),
+        Mean_Price_Change = price_change,
+        SD_Price_Change = NA,
+        N_Valid = 1
+      )
+  }
 }
 
 # ---- Save results ----

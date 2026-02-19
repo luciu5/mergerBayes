@@ -188,7 +188,7 @@ library(knitr)
 library(kableExtra)
 
 # Load Results
-pnb_bma <- read_csv("../results/pnb_model_results_fixed.csv", show_col_types = FALSE)
+pnb_bma <- read_csv("../results/pnb_model_results_pnb_1960.csv", show_col_types = FALSE)
 
 # --- Table 1: Model Comparison ---
 kable(pnb_bma %>% select(Model, LogML, Divergences, bayes_factor_vs_best, posterior_prob),
@@ -220,7 +220,7 @@ To account for model uncertainty, we compute the Bayesian Model Averaged (BMA) p
 
 ```{r pnb_params_table, echo=FALSE, message=FALSE, warning=FALSE}
 # Load Parameter Comparison Table
-pnb_params <- read_csv("../results/pnb_parameter_comparison_fixed.csv", show_col_types = FALSE)
+pnb_params <- read_csv("../results/pnb_parameter_comparison_pnb_1960.csv", show_col_types = FALSE)
 
 kable(pnb_params,
   caption = "Parameter Estimates by Model (Model-Specific Priors)"
@@ -245,7 +245,7 @@ library(kableExtra)
 
 # Load Simulation Results
 # Note: Ensure compute_pnb_effects.R has run.
-sim_file <- "../results/pnb_simulated_effects.csv"
+sim_file <- "../results/pnb_effects_summary.csv"
 
 if (file.exists(sim_file)) {
   sim_res <- read_csv(sim_file, show_col_types = FALSE)
@@ -253,10 +253,41 @@ if (file.exists(sim_file)) {
   # Add MonComp (0 effect) manually if desired, or just show strategic models.
   # User requested simulation for strategic models.
 
-  kable(sim_res,
+  library(tidyr)
+  
+  # Filter for Event 1
+  sim_res <- sim_res %>% filter(Event == 1)
+
+  # Process and Reshape
+  sim_table <- sim_res %>%
+    select(Method, Mean_Price_Change) %>%
+    mutate(
+      Model = case_when(
+        grepl("Bayesian_", Method) ~ gsub("Bayesian_", "", Method),
+        grepl("Calibration_", Method) ~ gsub("Calibration_", "", Method),
+        Method == "Calibration" ~ "Bertrand",
+        TRUE ~ Method
+      ),
+      Type = case_when(
+        grepl("Bayesian_", Method) ~ "Bayesian",
+        grepl("Calibration", Method) ~ "Calibration",
+        TRUE ~ "Other"
+      ),
+      Mean_Price_Change = Mean_Price_Change * 100 # Convert to percentage
+    ) %>%
+    select(Model, Type, Mean_Price_Change) %>%
+    tidyr::pivot_wider(names_from = Type, values_from = Mean_Price_Change) %>%
+    arrange(match(Model, c("Cournot", "Bertrand", "Auction", "MonCom")))
+  
+  # Ensure Calibration column exists even if missing
+  if(!"Calibration" %in% names(sim_table)) sim_table$Calibration <- NA
+  
+  # Fix Calibration only appearing for Bertrand (implicitly handled by pivot, others will be NA)
+
+  kable(sim_table,
     digits = 2,
-    col.names = c("Model", "Industry Price Change (%)", "Parties Price Change (%)"),
-    caption = "Simulated Merger Price Effects (1960 Snapshot)"
+    col.names = c("Model", "Bayesian Effect (%)", "Calibration Effect (%)"),
+    caption = "Simulated Merger Price Effects: Bayesian vs. Calibration (1960 Snapshot)"
   ) %>%
     kable_styling(latex_options = c("striped", "hold_position"))
 } else {
@@ -275,11 +306,7 @@ Under the Monopolistic Competition assumption, firms perceive the cross-price el
 Following a merger between firms $j$ and $k$, the merged entity maximizes joint profit $\pi_M = \pi_j + \pi_k$. The FOC with respect to $p_j$ becomes:
 $$ \frac{\partial \pi_M}{\partial p_j} = \underbrace{\left[ q_j + (p_j - c_j)\frac{\partial q_j}{\partial p_j} \right]}_{\text{Own-Effect}} + \underbrace{(p_k - c_k)\frac{\partial q_k}{\partial p_j}}_{\text{Cross-Effect (Merger)}} = 0 $$
 Because the model assumes $\frac{\partial q_k}{\partial p_j} = 0$, the "Cross-Effect" term vanishes. The post-merger FOC is identical to the pre-merger condition, implying that ownership consolidation creates no incentive to raise prices.
-pnb_params <- read_csv("../results/pnb_parameter_comparison_tight.csv", show_col_types = FALSE)
 
-kable(pnb_params, caption = "Parameter Estimates (Mean and SD) vs Priors") %>%
-  kable_styling(latex_options = c("striped", "hold_position"), font_size = 10)
-```
 
 
 
