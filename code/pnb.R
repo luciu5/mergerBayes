@@ -31,11 +31,9 @@ if (!dir.exists(resultsdir)) dir.create(resultsdir, recursive = TRUE)
 cat("Loading PNB Data from:", datafile, "\n")
 load(datafile) # Loads 'simdata'
 
-# MULTI-EVENT: All merger events, one year per event (earliest available)
-# Exclude Provident (3) and Houston (4): Provident has near-zero alpha,
-# Houston (72 firms) causes non-finite values in merger simulation.
+# SINGLE-EVENT SINGLE-YEAR: PNB (event 1), 1960 only
 simdata <- simdata %>%
-  filter(!event_id %in% c(3, 4)) %>%
+  filter(event_id == 1, year == 1960) %>%
   droplevels() %>%
   mutate(
     event = factor(event_id),
@@ -44,11 +42,7 @@ simdata <- simdata %>%
     loan_rate = 0
   ) %>%
   filter(is.finite(marginInv) & margin > 0) %>%
-  filter(margin >= 0.1) %>% # Surgical Outlier Removal
-  # Keep only one year per event (earliest year) - year is still numeric here
-  group_by(event) %>%
-  filter(as.numeric(as.character(year)) == min(as.numeric(as.character(year)))) %>%
-  ungroup() %>%
+  filter(margin >= 0.1) %>%
   mutate(
     event_mkt = paste0("event", event_id, "_", year),
     year = factor(year)
@@ -59,7 +53,7 @@ n_events <- nlevels(simdata$event)
 n_yrs <- nlevels(simdata$year)
 is_single <- (n_events == 1 && n_yrs == 1)
 
-cat("Filtered Multi-Event Data (1 year per event, Margin >= 0.1):", nrow(simdata), "observations\n")
+cat("Filtered Multi-Event Multi-Year Data (Margin >= 0.1):", nrow(simdata), "observations\n")
 cat("Events:", paste(levels(simdata$event), collapse = ", "), "\n")
 cat("Year per event:\n")
 print(simdata %>% group_by(event) %>% summarise(year = first(as.character(year)), n_firms = n(), .groups = "drop"))
@@ -147,8 +141,11 @@ sdata_template <- list(
   year = as.integer(simdata$year),
 
   # NEW: Values defined above for consistency
-  s0_prior_mean = qlogis(0.15),
-  s0_prior_sd = 1.0,
+
+  # S0 Prior: Informative for PNB
+  # Mean -3.0 (approx 5%), SD 1.2 => 95% mass between 0.5% and 35%
+  s0_prior_mean = -3.0, 
+  s0_prior_sd = 1.2,
 
   # HIERARCHICAL S0 DATA
   # Mapping: market_year -> (event, year)
@@ -170,7 +167,7 @@ sdata_template <- list(
 
   # --- DYNAMIC: Auto-detect Single vs Multi Market-Year ---
   is_single_market = as.integer(is_single), # TRUE only if n_yrs == 1
-  use_rho = as.integer(!is_single), # Enable correlation for panel data
+  use_rho = 0L, # Disabled
 
   # Structural Constraints
   use_hmt = 0L,
@@ -188,10 +185,10 @@ sdata_template <- list(
   prior_alpha_mean = 1.0,
   prior_alpha_sd = 1.0,
 
-  # Hierarchical Priors
+  # Hierarchical Priors (wider for multi-year panel with more data)
   prior_sigma_alpha = 1.0,
   prior_sigma_beta_s0 = 1.0,
-  prior_lkj = 4.0, # LKJ(4): concentrated around rho=0
+  prior_lkj = 2.0, # LKJ(2): mildly regularized, let data speak with panel
 
   implied_s0 = as.array(min_s0_data$min_s0)
 )
@@ -249,7 +246,7 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
   cat(msg)
   results <- list()
 
-  for (m in 1:1) { # TEST: Bertrand only
+  for (m in seq_along(models)) { # All selected models
     model_name <- models[m]
     
     cat("\n")
@@ -451,5 +448,5 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
 
 # --- EXECUTE BATCHES ---
 
-# Single-Year Multi-Event Test: All events in 1960, Bertrand only
-run_batch(sdata_template, "_1960_multievent", adapt_delta = 0.98)
+# Single-Year PNB: event 1, 1960, all 4 models
+run_batch(sdata_template, "_pnb_1960", adapt_delta = 0.95)

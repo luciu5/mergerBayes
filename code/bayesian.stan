@@ -41,7 +41,7 @@ functions {
       // STABLE PREDICTED SHARE (Absolute Volume Space)
       // We use the logit(s0) as the log-sum intercept
       real mu1 = s0[mky] + delta;
-      real pred_s = exp(mu1); 
+      real pred_s = exp(mu1);
 
       real alpha_structural = a_event[e] / rateDiff_sd;
       
@@ -60,9 +60,8 @@ functions {
       real mu2 = inv_markup;
       real err_share = shareIn[i] - pred_s;
       real mu2_cond = mu2 + slope_cond * err_share;
-      
-      // ABSOLUTE ERROR: No Dirac-Logit Collapse
-      lp += normal_lpdf(shareIn[i] | pred_s, sigma_share); 
+
+      lp += normal_lpdf(shareIn[i] | pred_s, sigma_share);
       lp += normal_lpdf(marginInv[i] | mu2_cond, sigma_cond);
     }
     return lp;
@@ -130,8 +129,11 @@ parameters {
   vector<lower=logit(0.01), upper=logit(0.99)>[N_market_year] s0_logit; 
   vector<lower=0, upper=1>[(use_cutoff == 1) ? N_event : 0] cutoff_share;
   vector<lower=-1, upper=1>[use_rho == 1 ? 1 : 0] rho_param; 
-  real<lower=0> sigma_share;    
-  real<lower=0> sigma_margin;     
+  
+  // ACTION 5: Reparameterize sigma_share and sigma_margin to Log Space
+  real log_sigma_share;    
+  real log_sigma_margin;     
+  
   vector<lower=0>[N_market_year > 1 ? 1 : 0] sigma_s0_vec; // Residual s0 scale
   
   // Hierarchical S0
@@ -144,6 +146,10 @@ parameters {
 }
 
 transformed parameters {
+  // ACTION 5: Transform back to natural scale
+  real sigma_share = exp(log_sigma_share);
+  real sigma_margin = exp(log_sigma_margin);
+
   real rho = 0.0;
   if (use_rho == 1) rho = rho_param[1];
   
@@ -163,6 +169,8 @@ transformed parameters {
   } else {
     b_event = mu_b_event_vec[1] + sigma_b_event_vec[1] * b_event_raw;
   }
+  
+  // ACTION 1: Non-Centered Parameterization (Already Present)
   vector[N_tophold] b_quality_all = sigma_b_strat * b_tophold_raw;
   
   // Fringe effects: Identified only if cutoff is active
@@ -216,7 +224,10 @@ model {
   }
   b_tophold_raw ~ std_normal();
   
-  sigma_b_strat ~ normal(0, prior_sigma_meanval_strat);
+  // ACTION 3: Regularize sigma_b_strat (Variance of Firm Effects)
+  // Instead of Half-Normal(0,1), use Normal(1.0, 0.5) to push away from zero/infinity
+  sigma_b_strat ~ normal(1.0, 0.5);
+
   if (use_cutoff == 1) {
     sigma_b_fringe_vec ~ normal(0, prior_sigma_meanval_fringe);
     mu_b_fringe_vec ~ normal(0, 2);
@@ -226,10 +237,18 @@ model {
     s0_logit ~ normal(logit(implied_s0), sigma_s0_vec[1]); 
     sigma_s0_vec ~ normal(0, 1.0);
   } else {
-    s0_logit ~ normal(logit(implied_s0), 5.0); // Centered prior
+    // Conditional Prior Logic:
+    // If we have a substantial outside share (> 2%), center prior on it.
+    // If we only have a residual floor (<= 2%), center prior on "sensible" 5%.
+    if (implied_s0[1] > 0.02) {
+       s0_logit ~ normal(logit(implied_s0), 1.0);
+    } else {
+       // Use the informative prior passed from R (e.g., Mean -3.0, SD 1.2)
+       s0_logit ~ normal(s0_prior_mean, s0_prior_sd); 
+    }
   }
   beta_s0 ~ normal(0, prior_sigma_beta_s0);
-
+  
   if (is_single_market == 0) {
     mu_s0_event_raw ~ std_normal();
     sigma_s0_event ~ normal(0, 1.0);
@@ -241,8 +260,12 @@ model {
   if (use_rho == 1) {
     target += (prior_lkj - 1) * log1m(square(rho_param[1])); // LKJ(prior_lkj) for 2x2 correlation
   }
-  sigma_share ~ normal(0, prior_sigma_share); 
-  sigma_margin ~ normal(0, prior_sigma_margin); 
+  
+  // Log-Space Priors for error SDs
+  // Tighter prior on sigma_share prevents collapse to ~0.001
+  // which creates extreme curvature and divergences via exp() link
+  log_sigma_share ~ normal(log(prior_sigma_share), 0.5);
+  log_sigma_margin ~ normal(log(prior_sigma_margin), 1.0);
 
   if (use_hmt == 1) {
      real alpha_check = exp(mu_log_a) / rateDiff_sd; 
