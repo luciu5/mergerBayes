@@ -107,7 +107,9 @@ data {
   real<lower=0> prior_sigma_alpha; 
   real<lower=0> prior_sigma_beta_s0; 
   real<lower=0> prior_lkj;
-  vector<lower=0, upper=1>[N_market_year] implied_s0; 
+  real<lower=0> prior_cutoff_alpha;
+  real<lower=0> prior_cutoff_beta;
+  vector<lower=0, upper=1>[N_market_year] implied_s0;
 }
 
 transformed data {
@@ -229,6 +231,7 @@ model {
   sigma_b_strat ~ normal(1.0, 0.5);
 
   if (use_cutoff == 1) {
+    cutoff_share ~ beta(prior_cutoff_alpha, prior_cutoff_beta);
     sigma_b_fringe_vec ~ normal(0, prior_sigma_meanval_fringe);
     mu_b_fringe_vec ~ normal(0, 2);
   }

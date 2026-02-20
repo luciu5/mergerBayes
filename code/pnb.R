@@ -189,6 +189,8 @@ sdata_template <- list(
   prior_sigma_alpha = 1.0,
   prior_sigma_beta_s0 = 1.0,
   prior_lkj = 2.0, # LKJ(2): mildly regularized, let data speak with panel
+  prior_cutoff_alpha = 3.0,
+  prior_cutoff_beta = 100.0,
 
   implied_s0 = as.array(min_s0_data$min_s0)
 )
@@ -257,7 +259,8 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
     cat("\n")
 
     sdata$supply_model <- as.integer(m)
-    sdata$use_cutoff <- 0L # DISABLE Strategic Cutoff (Base Models)
+    # Cutoff is meaningless for MonCom (all firms are single-product price-setters)
+    sdata$use_cutoff <- if (model_name == "MonCom") 0L else 0L  # DISABLE for base models
 
     # Calculate Model-Specific Prior (Calibration Mode)
     # This aligns the prior with the FOCs of each model (Bertrand vs Auction)
