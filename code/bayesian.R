@@ -66,7 +66,7 @@ rstan_options(auto_write = TRUE)
 Sys.setenv(STAN_NUM_THREADS = thread_count)
 rstan_options(threads_per_chain = thread_count)
 
-model_name <- c("bertrand", "2nd", "cournot", "moncom")
+model_name <- c("bertrand", "moncom", "cournot", "auction")
 log_msg(paste("Running Model:", model_name[thismodel], "| Chains:", chain_count, "| Threads:", thread_count))
 
 directory <- file.path(Sys.getenv("HOME"), "Projects", "mergerBayes")
