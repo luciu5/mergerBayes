@@ -42,6 +42,10 @@ if (is.na(use_hmt_arg)) use_hmt_arg <- 0
 data_frac <- as.numeric(args[6])
 if (is.na(data_frac)) data_frac <- 1.0
 
+# Toggle Rho: share-margin error correlation (1=yes, default 1)
+use_rho <- as.numeric(args[8])
+if (is.na(use_rho)) use_rho <- 0
+
 # Year Filter (Single "2014" or Range "2014-2016")
 filter_year_str <- as.character(args[7])
 if (is.na(filter_year_str) || filter_year_str == "NA") filter_year_str <- "2014-2015"
@@ -312,7 +316,7 @@ stan_data <- list(
 
   # --- Flags ---
   is_single_market = as.integer(is_single_market),
-  use_rho = 1L,
+  use_rho = as.integer(use_rho),
   use_hmt = as.integer(use_hmt_arg),
 
   # --- HMT inputs ---
