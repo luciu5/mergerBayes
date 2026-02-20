@@ -162,15 +162,13 @@ if (data_frac < 1.0 && data_frac > 0) {
   log_msg(paste("Reduced to", n_keep, "markets."))
 }
 
-if (start_year > 0 || data_frac < 1.0) {
-  # Re-level again after subsampling
-  simdata <- simdata %>%
-    mutate(
-      event_mkt = droplevels(event_mkt),
-      tophold = droplevels(tophold),
-      year = factor(year)
-    )
-}
+# Re-level factors after filtering/subsampling
+simdata <- simdata %>%
+  mutate(
+    event_mkt = droplevels(event_mkt),
+    tophold = droplevels(tophold),
+    year = factor(year)
+  )
 
 
 # ------------------------------------------------------------------------------
@@ -257,15 +255,30 @@ simdata <- simdata %>% mutate(market_year = interaction(event_mkt, year, drop = 
 simdata <- simdata %>% mutate(market_year_idx = as.numeric(market_year))
 N_market_year <- length(unique(simdata$market_year))
 
+# Build market-year -> event and market-year -> year mappings
+mky_to_event <- integer(N_market_year)
+mky_to_year  <- integer(N_market_year)
+event_int <- as.integer(simdata$event_mkt)
+year_int  <- as.integer(simdata$year)
+for (i in seq_len(nrow(simdata))) {
+  mky_to_event[simdata$market_year_idx[i]] <- event_int[i]
+  mky_to_year[simdata$market_year_idx[i]]  <- year_int[i]
+}
+
+# Implied outside share per market-year (from fringe firms removed earlier)
+implied_s0 <- numeric(N_market_year)
+for (m in seq_len(N_market_year)) {
+  idx <- which(simdata$market_year_idx == m)
+  implied_s0[m] <- max(0.01, min(0.99, 1.0 - sum(simdata$shareIn[idx])))
+}
+
 stan_data <- list(
   # --- Standard Inputs ---
-  supply_model = as.integer(thismodel),
-  use_cutoff = as.integer(use_cutoff),
   N = nrow(simdata),
   shareIn = simdata$shareIn,
   marginInv = 1 / simdata$margin,
   rateDiff = as.numeric(scale(simdata$rate_deposits, center = TRUE, scale = TRUE)),
-
+  rateDiff_sd = sd(simdata$rate_deposits, na.rm = TRUE),
 
   # --- Indexing ---
   N_event = nlevels(simdata$event_mkt),
@@ -273,32 +286,57 @@ stan_data <- list(
   N_tophold = nlevels(simdata$tophold),
   tophold = as.integer(simdata$tophold),
   N_year = nlevels(simdata$year),
-  year = as.numeric(simdata$year),
+  year = as.integer(simdata$year),
+  supply_model = as.integer(thismodel),
+  use_cutoff = as.integer(use_cutoff),
+  grainsize = max(100, round(nrow(simdata) / (4 * chain_count))),
   N_market_year = N_market_year,
   market_year_idx = as.integer(simdata$market_year_idx),
 
-  # --- Covariates (Scaled) ---
-  log_deposits = as.numeric(scale(log(eventdata$deposit_total_market))),
-  # REMOVED log_assets
-  rateDiff_sd = sd(simdata$rate_deposits, na.rm = TRUE),
-  grainsize = max(100, round(nrow(simdata) / (4 * chain_count))),
+  # --- S0 Covariates: Intercept + log(Deposits) + log(Assets) ---
+  K_s0 = 3L,
+  X_s0 = simdata %>%
+    group_by(market_year) %>%
+    summarise(
+      Intercept = 1,
+      log_dep = mean(log(total_deposits), na.rm = TRUE),
+      log_ast = mean(log(total_assets), na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    select(Intercept, log_dep, log_ast) %>%
+    as.matrix(),
 
-  # --- NEW FLAGS (PNB / HMT) ---
+  # --- Market-year mappings ---
+  mky_to_event = as.array(mky_to_event),
+  mky_to_year  = as.array(mky_to_year),
+
+  # --- Flags ---
   is_single_market = as.integer(is_single_market),
-  use_cutoff = 1L, # Default: Hybrid Model (Small=MonCom)
+  use_rho = 1L,
   use_hmt = as.integer(use_hmt_arg),
-  fix_supply_intercept = 0L, # Default: Allow supply intercept
+
+  # --- HMT inputs ---
   avg_price_hmt = avg_price_hmt,
   avg_margin_hmt = avg_margin_hmt,
   ssnip_hmt = ssnip_hmt,
-  min_s0 = min_s0_vec, # Actual fringe share vector (aligned)
 
-  # --- PRIOR SCALES (Panel - Moderate Tolerance) ---
-  prior_sigma_share = 0.005, # Absolute (0.5% share tolerance)
-  prior_sigma_margin = 1.0 * mean(1 / simdata$margin, na.rm = TRUE), # Loose (1.0) Margin Tolerance
-  prior_sigma_meanval_strat = 1.5, # Increased to 1.5 to absorb variation from removed assets
-  prior_sigma_meanval_fringe = 0.3, # Slightly looser (heterogeneous small banks)
-  prior_lkj = 4.0 # Skeptical prior for Rho
+  # --- Prior Scales ---
+  prior_sigma_share = 0.005,
+  prior_sigma_margin = 1.0 * mean(1 / simdata$margin, na.rm = TRUE),
+  prior_sigma_meanval_strat = 1.5,
+  prior_sigma_meanval_fringe = 0.3,
+  prior_alpha_mean = 4.0,
+  prior_alpha_sd = 3.0,
+  s0_prior_mean = -1.0,
+  s0_prior_sd = 1.0,
+  prior_sigma_alpha = 1.0,
+  prior_sigma_beta_s0 = 1.0,
+  prior_lkj = 4.0,
+  prior_cutoff_alpha = 3.0,
+  prior_cutoff_beta = 100.0,
+
+  # --- Implied outside share ---
+  implied_s0 = as.array(implied_s0)
 )
 
 # Export for Debugging
@@ -333,28 +371,19 @@ log_msg("Sampling complete.")
 # ------------------------------------------------------------------------------
 log_msg("Generating summaries...")
 
-# Adjust parameters to extract based on single market vs panel
-base_pars <- c("a_event", "s0", "Rescor", "sigma_share_abs", "sigma_margin")
-# In single market mode, we care about the hyper-means mostly
-if (is_single_market == 1) {
-  # We might want to look at mu_log_a directly
-  base_pars <- c(base_pars, "mu_log_a")
+# Parameters to extract (matched to current bayesian.stan)
+base_pars <- c("a_event", "s0", "sigma_share", "sigma_margin", "rho", "mu_log_a")
+if (is_single_market == 0) {
+  base_pars <- c(base_pars, "b_event")
 }
+if (stan_data$use_cutoff == 1) base_pars <- c(base_pars, "cutoff_share")
+if (nlevels(simdata$year) > 1) base_pars <- c(base_pars, "year_effect_s0")
 
-if (stan_data$use_cutoff == 1) sum_pars <- c(base_pars, "cutoff_share") else sum_pars <- base_pars
-# Add year effects if useful
-sum_pars <- c(sum_pars, "year_effect_demand", "year_effect_supply")
-
-fit_sum <- summary(fit, pars = sum_pars)$summary
-
-# Negative margin check
-neg_count_samples <- try(rstan::extract(fit, "neg_margin_count")[[1]], silent = TRUE)
-neg_count_mean <- if (!inherits(neg_count_samples, "try-error")) mean(neg_count_samples) else NA
-log_msg(paste("Avg negative margins:", neg_count_mean))
+fit_sum <- summary(fit, pars = base_pars)$summary
 
 # Save SUMMARY immediately
 log_msg("Saving summary file...")
-saveRDS(list(summary = fit_sum, neg_margin_mean = neg_count_mean, stan_data = stan_data), file = outfile_summary)
+saveRDS(list(summary = fit_sum, stan_data = stan_data), file = outfile_summary)
 
 # LOO
 log_msg("Running LOO...")
