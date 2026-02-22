@@ -66,7 +66,7 @@ rstan_options(auto_write = TRUE)
 Sys.setenv(STAN_NUM_THREADS = thread_count)
 rstan_options(threads_per_chain = thread_count)
 
-model_name <- c("bertrand", "moncom", "cournot", "auction")
+model_name <- c("bertrand", "auction", "cournot", "moncom")
 log_msg(paste("Running Model:", model_name[thismodel], "| Chains:", chain_count, "| Threads:", thread_count))
 
 directory <- file.path(Sys.getenv("HOME"), "Projects", "mergerBayes")
@@ -261,12 +261,12 @@ N_market_year <- length(unique(simdata$market_year))
 
 # Build market-year -> event and market-year -> year mappings
 mky_to_event <- integer(N_market_year)
-mky_to_year  <- integer(N_market_year)
+mky_to_year <- integer(N_market_year)
 event_int <- as.integer(simdata$event_mkt)
-year_int  <- as.integer(simdata$year)
+year_int <- as.integer(simdata$year)
 for (i in seq_len(nrow(simdata))) {
   mky_to_event[simdata$market_year_idx[i]] <- event_int[i]
-  mky_to_year[simdata$market_year_idx[i]]  <- year_int[i]
+  mky_to_year[simdata$market_year_idx[i]] <- year_int[i]
 }
 
 # Implied outside share per market-year (from fringe firms removed earlier)
@@ -312,7 +312,7 @@ stan_data <- list(
 
   # --- Market-year mappings ---
   mky_to_event = as.array(mky_to_event),
-  mky_to_year  = as.array(mky_to_year),
+  mky_to_year = as.array(mky_to_year),
 
   # --- Flags ---
   is_single_market = as.integer(is_single_market),

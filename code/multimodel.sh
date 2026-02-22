@@ -8,7 +8,7 @@
 #SBATCH --array=1-4            # Adjusted to 1-4 (Bertrand, Auction, Cournot, MonCom)
 
 # Model names for readable output
-MODEL_NAMES=("" "bertrand" "moncom" "cournot" "auction")
+MODEL_NAMES=("" "bertrand" "auction" "cournot" "moncom")
 MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
 
 # Set number of chains and threads per chain
