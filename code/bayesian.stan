@@ -288,33 +288,37 @@ model {
 generated quantities {
   vector[N] pred_shareIn;
   vector[N] pred_marginInv;
-  
+  vector[N] log_lik;
+
   {
-    real k = 0.2; 
+    real k = 0.2;
+    real sigma_cond_gq = sigma_margin * sqrt(1.0 - square(rho));
+    real slope_cond_gq = rho * (sigma_margin / sigma_share);
+
     for (n in 1:N) {
       int e = event[n];
       int mky = market_year_idx[n];
-      
-      real w = 0; 
+
+      real w = 0;
       if (use_cutoff == 1) {
         real x = -(shareIn[n] - cutoff_share[e]) / k;
         if (x > 10) w = 1.0; else if (x < -10) w = 0.0; else w = inv_logit(x);
       }
-      
+
       real b_quality = b_quality_all[tophold[n]] + (w * mu_b_fringe);
       real delta = b_event[e] + b_quality + (a_event[e] * rateDiff[n]);
-      
+
       real mu1 = s0[mky] + delta;
       pred_shareIn[n] = exp(mu1);
-      
+
       real s_out = inv_logit(s0[mky]);
-      if (s_out < 0.01) s_out = 0.01; 
+      if (s_out < 0.01) s_out = 0.01;
       real alpha_structural = a_event[e] / rateDiff_sd;
-      
+
       real inv_markup;
-      if (supply_model == 1) { 
+      if (supply_model == 1) {
         inv_markup = alpha_structural * (w + (1-w) * (1.0 - shareIn[n] * (1.0 - s_out)));
-      } else if (supply_model == 2) { 
+      } else if (supply_model == 2) {
         real denom = fmin(0.99, shareIn[n] * (1.0 - s_out));
         inv_markup = alpha_structural * (w + (1-w) * (denom / -log(1.0 - denom)));
       } else if (supply_model == 3) {
@@ -322,8 +326,14 @@ generated quantities {
       } else {
         inv_markup = alpha_structural;
       }
-      
+
       pred_marginInv[n] = inv_markup;
+
+      // Joint log-likelihood: marginal share + conditional margin | share error
+      real err_share = shareIn[n] - pred_shareIn[n];
+      real mu_margin_cond = inv_markup + slope_cond_gq * err_share;
+      log_lik[n] = normal_lpdf(shareIn[n]   | pred_shareIn[n],  sigma_share)
+                 + normal_lpdf(marginInv[n]  | mu_margin_cond,   sigma_cond_gq);
     }
   }
 }
