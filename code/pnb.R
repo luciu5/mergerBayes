@@ -15,6 +15,7 @@ WARMUP <- 1000
 CHAINS <- 4
 CORES <- 4
 SEED <- 1960 # Data year
+FORCE_CUTOFF <- FALSE # Override: set TRUE to enable cutoff even in single-market mode
 
 # Paths
 directory <- "d:/Projects/mergerBayes"
@@ -33,7 +34,7 @@ load(datafile) # Loads 'simdata'
 
 # SINGLE-EVENT SINGLE-YEAR: PNB (event 1), 1960 only
 simdata <- simdata %>%
-  filter(event_id == 1, year == 1960) %>%
+  filter(event_id == 1) %>% # All years for PNB event
   droplevels() %>%
   mutate(
     event = factor(event_id),
@@ -51,7 +52,10 @@ simdata <- simdata %>%
 
 n_events <- nlevels(simdata$event)
 n_yrs <- nlevels(simdata$year)
-is_single <- (n_events == 1 && n_yrs == 1)
+# Force single-market mode: PNB has only 1 event, so the hierarchical alpha
+# decomposition (mu_log_a + sigma_log_a * r) is non-identified regardless of
+# how many years are present. Use is_single=TRUE so a_event = exp(mu_log_a).
+is_single <- (n_events == 1)
 
 cat("Filtered Multi-Event Multi-Year Data (Margin >= 0.1):", nrow(simdata), "observations\n")
 cat("Events:", paste(levels(simdata$event), collapse = ", "), "\n")
@@ -122,7 +126,10 @@ bank_assets <- simdata$total_assets
 
 # Stan Data Preparation (Template)
 sdata_template <- list(
-  use_cutoff = 0L, # DISABLED: Incompatible with absolute error likelihood
+  # Auto-disable cutoff for single-market: fringe parameters over-parameterize
+  # the share equation when there are bank-level quality intercepts.
+  # Override with FORCE_CUTOFF = TRUE at the top of this script.
+  use_cutoff = if (is_single && !FORCE_CUTOFF) 0L else 1L,
   N = nrow(simdata),
   shareIn = simdata$shareIn,
   marginInv = simdata$marginInv,
@@ -144,30 +151,33 @@ sdata_template <- list(
 
   # S0 Prior: Informative for PNB
   # Mean -3.0 (approx 5%), SD 1.2 => 95% mass between 0.5% and 35%
-  s0_prior_mean = -3.0, 
+  s0_prior_mean = -3.0,
   s0_prior_sd = 1.2,
 
   # HIERARCHICAL S0 DATA
   # Mapping: market_year -> (event, year)
   # Each event has one year, so market_year_idx = event index
-  N_market_year = nlevels(interaction(simdata$event, simdata$year, drop=TRUE)),
-  market_year_idx = as.integer(interaction(simdata$event, simdata$year, drop=TRUE)),
+  N_market_year = nlevels(interaction(simdata$event, simdata$year, drop = TRUE)),
+  market_year_idx = as.integer(interaction(simdata$event, simdata$year, drop = TRUE)),
   mky_to_event = {
-    mky_map <- simdata %>% distinct(event, year) %>% arrange(interaction(event, year, drop=TRUE))
+    mky_map <- simdata %>%
+      distinct(event, year) %>%
+      arrange(interaction(event, year, drop = TRUE))
     as.array(as.integer(mky_map$event))
   },
   mky_to_year = {
-    mky_map <- simdata %>% distinct(event, year) %>% arrange(interaction(event, year, drop=TRUE))
+    mky_map <- simdata %>%
+      distinct(event, year) %>%
+      arrange(interaction(event, year, drop = TRUE))
     as.array(as.integer(mky_map$year))
   },
-
   K_s0 = 0L, # No covariates for now
-  X_s0 = matrix(0, nlevels(interaction(simdata$event, simdata$year, drop=TRUE)), 0),
+  X_s0 = matrix(0, nlevels(interaction(simdata$event, simdata$year, drop = TRUE)), 0),
   grainsize = 1,
 
   # --- DYNAMIC: Auto-detect Single vs Multi Market-Year ---
   is_single_market = as.integer(is_single), # TRUE only if n_yrs == 1
-  use_rho = 0L, # Disabled
+  use_rho = 1L, # Estimate share-margin error correlation
 
   # Structural Constraints
   use_hmt = 0L,
@@ -191,7 +201,6 @@ sdata_template <- list(
   prior_lkj = 2.0, # LKJ(2): mildly regularized, let data speak with panel
   prior_cutoff_alpha = 3.0,
   prior_cutoff_beta = 100.0,
-
   implied_s0 = as.array(min_s0_data$min_s0)
 )
 
@@ -202,7 +211,7 @@ stan_mod <- stan_model(modelpath)
 models <- c("Bertrand", "Auction", "Cournot", "MonCom")
 
 # --- HELPER: CALCULATE MODEL-SPECIFIC PRIORS ---
-get_alpha_prior <- function(model_name, data) {
+get_alpha_prior <- function(model_name, data, rate_sd) {
   # Data extremes (ROBUST: 5th/95th Percentile per user request)
   # Avoids outliers like margin=0.03 driving the prior
   s_low <- quantile(data$shareIn, 0.05)
@@ -228,12 +237,20 @@ get_alpha_prior <- function(model_name, data) {
     a_low <- 1 / m_high
     a_high <- 1 / m_low
   }
-
-  # Construct Prior: N(mean, sd) to cover [a_low, a_high] with 95% mass
   p_mean <- (a_high + a_low) / 2
-  p_sd <- (a_high - a_low) / 4
+  # SD must be on LOG SCALE: Stan uses mu_log_a ~ normal(log(mean), sd)
+  # Use /6 for 3-sigma (99.7%) coverage — tighter than /4 to prevent degenerate α→0 mode
+  p_sd <- (log(a_high) - log(a_low)) / 6
 
-  return(list(mean = p_mean, sd = p_sd))
+  # SCALE TO STANDARDIZED UNITS (matching Mu_Log_A in Stan)
+  # mu_log_a ~ normal(log(prior_alpha_mean), prior_alpha_sd)
+  # a_event = exp(mu_log_a)
+  # alpha_structural = a_event / rate_sd
+  # Therefore: a_event = alpha_structural * rate_sd
+  p_mean_scaled <- p_mean * rate_sd
+  p_sd_scaled <- p_sd # Already on log scale — invariant to level scaling
+
+  return(list(mean = p_mean_scaled, sd = p_sd_scaled))
 }
 
 # --- BATCH EXECUTION FUNCTION ---
@@ -250,7 +267,7 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
 
   for (m in seq_along(models)) { # All selected models
     model_name <- models[m]
-    
+
     cat("\n")
     cat("========================================\n")
     cat(sprintf("   MODEL %d of %d: %s\n", m, length(models), model_name))
@@ -259,12 +276,13 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
     cat("\n")
 
     sdata$supply_model <- as.integer(m)
-    # Cutoff is meaningless for MonCom (all firms are single-product price-setters)
-    sdata$use_cutoff <- if (model_name == "MonCom") 0L else 0L  # DISABLE for base models
+    # Cutoff: disabled for MonCom (FOC has no w-weighting)
+    # Also auto-disabled for single-market unless FORCE_CUTOFF is TRUE
+    sdata$use_cutoff <- if (model_name == "MonCom") 0L else as.integer(sdata_template$use_cutoff)
 
     # Calculate Model-Specific Prior (Calibration Mode)
     # This aligns the prior with the FOCs of each model (Bertrand vs Auction)
-    prior <- get_alpha_prior(model_name, simdata)
+    prior <- get_alpha_prior(model_name, simdata, sdata$rateDiff_sd)
     sdata$prior_alpha_mean <- prior$mean
     sdata$prior_alpha_sd <- prior$sd
     cat(sprintf("   Alpha Prior: Normal(%.2f, %.2f)\n", prior$mean, prior$sd))
@@ -278,9 +296,9 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
       )
       # Only initialize hierarchical params when is_single_market = 0
       if (!is_single) {
-        init_list$sigma_log_a_vec = array(0.5, 1)
-        init_list$mu_b_event_vec = array(0.0, 1)
-        init_list$sigma_b_event_vec = array(0.5, 1)
+        init_list$sigma_log_a_vec <- array(0.5, 1)
+        init_list$mu_b_event_vec <- array(0.0, 1)
+        init_list$sigma_b_event_vec <- array(0.5, 1)
       }
       init_list
     }
@@ -290,7 +308,7 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
       data = sdata, chains = CHAINS, cores = CORES,
       iter = ITER + WARMUP, warmup = WARMUP, seed = SEED,
       init = init_fun,
-      control = list(adapt_delta = adapt_delta, max_treedepth = 15)
+      control = list(adapt_delta = adapt_delta, max_treedepth = 12)
     )
     saveRDS(fit, file.path(resultsdir, paste0("pnb_fit_", model_name, ".rds")))
 
@@ -451,5 +469,6 @@ run_batch <- function(sdata, suffix, adapt_delta = 0.95) {
 
 # --- EXECUTE BATCHES ---
 
-# Single-Year PNB: event 1, 1960, all 4 models
-run_batch(sdata_template, "_pnb_1960", adapt_delta = 0.95)
+# All-Year PNB: event 1, all years, use_rho, all 4 models
+# Cutoff auto-disabled for single-market (set FORCE_CUTOFF=TRUE to override)
+run_batch(sdata_template, "_pnb_allyears", adapt_delta = 0.99)
