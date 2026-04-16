@@ -12,145 +12,198 @@ bibliography: references.bib
 
 # Introduction
 
-Merger review inherently takes place in a data-constrained environment. Antitrust agencies and practitioners are frequently tasked with simulating the effects of a proposed combination using only a single cross-section of market shares, prices, and potentially a few margin observations. In this setting, standard econometric techniques that rely on asymptotics are fundamentally inapplicable. There is simply not enough data to support traditional estimation.
+Merger review is inherently a problem of inference under severe data constraints. Antitrust agencies and practitioners are often asked to evaluate the competitive effects of a proposed transaction using a single cross-section of market shares, prices, and sometimes margin information. In this setting, standard econometric approaches that rely on large-sample variation are not available. Instead, practitioners typically impose a structural model of competition, most often Bertrand pricing, and use that model to simulate post-merger outcomes.
 
-This constraint forces valid structural modeling to confront a deeper, often ignored issue in Industrial Organization: **Model Uncertainty**. Theoretical ambiguity is a genuine feature of many markets. For example, in industries with complex institutional features—such as banking or healthcare—it is often unclear whether firms compete purely on price (Bertrand), localized monopoly power (Monopolistic Competition), or through sealed-bid mechanisms (Auctions). While the field has developed valid tests for non-nested model selection (e.g., @RiversVuong2002), these procedures typically rely on asymptotic properties that may not hold in a merger review setting with limited degrees of freedom. Moreover, such tests generally seek to identifying a single "best" model. In finite samples where the data may be ambiguous, this forces a binary choice that ignores the remaining uncertainty.
+That reliance on a single conduct assumption is fragile. Prior work shows that merger predictions can vary sharply across standard models of firm behavior, including Bertrand, Cournot, and auction-based competition [@TaraginPanhans2023]. Related work on screening thresholds shows that this model dependence can translate into instability in concentration-based policy rules. The core problem is therefore not merely that merger simulation is sensitive to assumptions. It is that the economic conclusions of a merger review can depend critically on assumptions about firm conduct that are usually untested, and often untestable, in the information set available to agencies.
 
-To overcome this, practitioners typically resort to **calibration methods**. This approach essentially treats the structural equations of a specific competitive model (e.g., Bertrand) as exact constraints to back out unobserved parameters like marginal costs or demand elasticities. Effectively, calibration is a "poor man's Bayesian analysis"—it is equivalent to Bayesian inference with degenerate priors that assign 100% probability to a specific theoretical model and 0% to all others.
+This paper provides a framework for conducting merger analysis under such **model uncertainty**. Rather than selecting a single model of competition, we treat conduct as an object of inference. We embed multiple canonical models--Bertrand, Cournot, second-score auction, and monopolistic competition--within a unified structural framework and use Bayesian methods to estimate their posterior probabilities given the observed data. Merger effects are then computed as probability-weighted averages across models, so that policy conclusions reflect uncertainty about the underlying competitive environment.
 
-The fragility of this approach is exposed when the "true" model of competition is unknown. As demonstrated in @TaraginPanhans2023, conditioning on different standard models yields contradictory predictions about merger effects. By committing to a single model, the analyst implicitly assumes away all structural uncertainty, leading to overconfident policy prescriptions.
+The novelty is not Bayesian model averaging in the abstract. Bayesian Model Averaging (BMA) is a standard statistical tool. Our contribution is to apply it to **structural conduct models**, where each model represents a distinct equilibrium concept and implies a different mapping between observable market shares and firm margins. The posterior probability of a model is therefore not just a measure of statistical fit. It summarizes how well that conduct model reconciles the demand-side information in prices and shares with the supply-side information in margins.
 
-In this paper, we propose replacing this rigid approach with the **full Bayesian machinery**. Unlike frequentist tests that require asymptotics to reject a model, the Bayesian framework is designed "from the ground up" to quantify uncertainty through probability. By explicitly modeling the joint distribution of observed data and parameters, we address the "model selection problem" directly through **Bayesian Model Averaging (BMA)**. Instead of forcing a binary choice between statistically indistinguishable theories, we estimate the posterior probability of each model given the finite data available.
+This perspective also clarifies the relationship between Bayesian merger review and conventional calibration. Calibration implicitly places probability one on a single conduct model and probability zero on all alternatives. It is therefore a degenerate Bayesian procedure. Our framework replaces this all-or-nothing choice with explicit posterior uncertainty over conduct models and carries that uncertainty through to the merger counterfactual.
 
-Our contribution is not the development of new Bayesian statistical theory, but rather the application of these standard tools to resolve a persistent identification failure in antitrust policy. While BMA is well-established in macroeconomics and finance, its utility for merger simulation has been overlooked. We show that BMA provides the missing link between the theoretical ambiguity of firm conduct and the practical necessity of reaching a decision in data-constrained reviews. By operationalizing this "conduct-agnostic" framework, we offer a rigorous alternative to the ad-hoc assumptions that currently dominate imperfectly competitive market analysis.
+A second contribution is to show how identification changes with the available **information set**. We distinguish four canonical environments: (i) one market observed in one period, corresponding to the typical case-level merger review; (ii) one market observed over multiple periods; (iii) multiple markets observed in one period; and (iv) multiple markets observed over multiple periods. These environments form a nested sequence in which additional variation over time or across markets sharpens inference about demand, outside share, and conduct. Bayesian methods do not create identification where the likelihood is uninformative. They provide coherent inference when identification is weak, partial, or model-dependent.
 
-# Structural Models of Competition
+We apply the framework to banking, with *United States v. Philadelphia National Bank* (1963) as the flagship application. PNB is an ideal case because it is the canonical source of the structural presumption in merger law, it is historically important, and banking is one of the rare settings where shares, prices, and margin proxies can be observed. We use the broader Supreme Court banking merger setting only as external validation: the main question in this paper is how to conduct merger simulation when both the data and the conduct model are uncertain.
 
-We consider four canonical models of competition. We assume a standard Logit demand system where the market share $s_j$ of product $j$ is given by:
+# Structural Framework and Identification
+
+We assume a standard Logit demand system where the market share $s_j$ of product $j$ is
 $$
-s_j(\mathbf{p}) = \frac{\exp(\delta_j)}{\sum_{k=0}^J \exp(\delta_k)}
+s_j(\mathbf{p}) = \frac{\exp(\delta_j)}{1 + \sum_{k=1}^J \exp(\delta_k)},
 $$
-where $\delta_j = \beta x_j - \alpha p_j + \xi_j$ is the mean utility (net of price) and $\alpha$ is the price sensitivity parameter. The outside good share is denoted as $s_0$. 
+with
+$$
+\delta_j = x_j \beta - \alpha p_j + \xi_j.
+$$
+Here $\alpha$ is the price sensitivity parameter and $s_0$ denotes the outside share.
 
 ## Why Share-Consistent Demand?
 
-We deliberately adopt a demand system consistent with share-based concentration metrics for three reasons rooted in the institutional reality of antitrust enforcement.
+We deliberately use a demand system that is consistent with share-based concentration metrics for three reasons rooted in the institutional reality of antitrust enforcement.
 
-First, **legal doctrine operates on market shares**. From the *Philadelphia National Bank* structural presumption to the modern *Merger Guidelines*, agencies primarily screen and challenge mergers based on share-based concentration measures (e.g., HHI). A demand model that does not map market structure effectively to price effects would be theoretically flexible but institutionally irrelevant. Among demand systems consistent with this share-centric paradigm, Logit and CES are the primary tractable options.
+First, **legal doctrine operates on market shares**. From the *Philadelphia National Bank* structural presumption to the modern *Merger Guidelines*, agencies primarily screen and challenge mergers using share-based concentration measures such as HHI. A demand system that cannot map market structure into price effects is theoretically flexible but institutionally less useful. Among demand systems consistent with this share-centric paradigm, Logit and CES are the primary tractable options.
 
-Second, **data constraints preclude flexibility**. While Random Coefficients Logit allows for richer substitution patterns, it requires micro-data that is rarely available in the initial stages of merger review. In the absence of such data, flexible models collapse back to calibration on shares, effectively mimicking the Logit outcome but with less transparency.
+Second, **data constraints preclude unrestricted flexibility**. Random coefficients Logit allows richer substitution patterns, but it requires micro-data that is rarely available in the initial stages of merger review. In the absence of such data, flexible models often collapse back to calibration on shares, but with less transparency.
 
-Third, our Bayesian approach **endogenizes market definition**. A common critique of Logit is its sensitivity to the definition of the outside good. Unlike standard calibration—which fixes $s_0$ ad-hoc—we treat the outside share $s_0$ as an unknown parameter to be estimated. This allows the model to probabilistically "size the market" based on the observed tension between prices and shares, absorbing the uncertainty of market definition directly into the posterior.
+Third, our Bayesian approach **endogenizes market definition**. A common critique of Logit is its sensitivity to the outside good. Unlike standard calibration, which fixes $s_0$ ad hoc, we treat the outside share as an unknown parameter. This lets the model probabilistically size the market using the observed tension between prices, shares, and margins.
 
-In our Bayesian framework, we estimate a structural parameter $\tilde{\alpha}$ that scales the margin relationships derived below.
+## Margin-Share Relationships Across Conduct Models
 
-## Bertrand Competition
-...
-
-# Bayesian Methodology
-
-## Model Estimation
-
-We estimate each model $m \in \{ \text{Cournot, Bertrand, Auction, MonComp} \}$ using a Bayesian hierarchical framework implemented in Stan. For each model, we specify the joint likelihood of observed market shares and margins. The structural parameters—including the price sensitivity $\alpha$, marginal costs $c$, and the **outside share $s_0$**—are estimated simultaneously. Unlike standard calibration approaches that often "plug in" an arbitrary value for the outside good (e.g., 50%), we treat $s_0$ as an unknown parameter to be inferred from the data (conditioned on priors), further capturing the uncertainty inherent in market definition.
-
-## Bertrand Competition
-
-Following the notation in @TaraginPanhans2023, under Bertrand competition with differentiated products, the margin is given by:
+The conduct models differ in how they map shares into markups. Under standard assumptions, each model implies a first-order condition of the form
 $$
-m_j \propto \frac{1}{1 - s_j(1 - s_0)}
+p_j - c_j = \frac{1}{\alpha} \kappa_j^{(k)}(s_j, s_0),
 $$
-This form captures the standard internalization of cross-elasticities in a Logit setting.
+where $\kappa_j^{(k)}(\cdot)$ is a model-specific markup function for conduct model $k$.
 
-## Second-Score Auction
+Equivalently, up to a common scale factor, the inverse margin relationship differs across conduct models:
 
-In the Second-Score Auction model (often applicable to bidding markets), the relationship between the margin and market shares is derived as:
+**Bertrand (differentiated products):**
 $$
-m_j \propto \frac{-\log(1 - s_j(1-s_0))}{s_j(1-s_0)}
-$$
-This model captures competitive dynamics where the pricing is determined by the distribution of the second-best valuation.
-
-## Cournot Competition
-
-For Cournot competition (quantity setting) under Logit demand, the margin relates to the outside good share as:
-$$
-m_j \propto \frac{s_0 + s_j}{s_0} = 1 + \frac{s_j}{s_0}
-$$
-This relationship implies that as a firm's market share increases (relative to the outside option), its margin increases above the competitive baseline.
-
-## Monopolistic Competition
-
-Finally, we include a model of Monopolistic Competition. In this limiting case, firms have market power but do not strategically interact with specific rivals. This implies a constant scaling:
-$$
-m_j \propto 1
-$$
-This serves as a baseline where margins are determined solely by own-price elasticity, independent of local market share variations.
-
-# Theoretical Intuition
-
-The core intuition behind our identification strategy relies on the fact that different models of competition predict different margins for the same observed market shares and prices. Since we treat margins as observed data in our Bayesian framework, the model that predicts margins closest to the observed values will receive higher posterior probability.
-
-We formalize this intuition with the following proposition, which establishes a rank ordering of the predicted margins across the candidate models.
-
-**Proposition 1 (Structural Margin Hierarchy)**. *Conditioning on market shares $\mathbf{s}$ and a given price sensitivity $\alpha$, the predicted margins for firm $j$ satisfy the strict ordering:*
-
-$$
-m^{Cournot}_j > m^{Bertrand}_j > m^{Auction}_j > m^{MonComp}_j
+m_j^{-1} \propto 1 - s_j(1 - s_0).
 $$
 
-*Proof.*
-Using the margin relationships derived above:
-1.  **Cournot**: $m_j \propto 1 + s_j/s_0$
-2.  **Bertrand**: $m_j \propto (1 - s_j(1-s_0))^{-1} \approx 1 + s_j$
-3.  **Auction**: $m_j \propto -\log(1 - s_j(1-s_0))/ (s_j(1-s_0)) \approx 1 + s_j/2$
-4.  **MonComp**: $m_j \propto 1$
+**Second-score auction:**
+$$
+m_j^{-1} \propto \frac{s_j(1 - s_0)}{-\log(1 - s_j(1 - s_0))}.
+$$
 
-For strictly positive market shares and $s_0 < 1$, the Cournot markup factor (scaled by $1/s_0$) is strictly the largest, followed by Bertrand (differentiated scaling), Auction (second-score scaling), and Monopolistic Competition (constant).
+**Cournot (quantity competition):**
+$$
+m_j^{-1} \propto \frac{s_0}{s_0 + s_j}.
+$$
 
-**Corollary 1 (Rank Ordering of Calibrated Alphas)**. *To rationalize a fixed set of observed margins, shares, and prices, the calibrated price sensitivity parameters $\alpha$ must satisfy the same strict ordering:*
-$$ \alpha^{Cournot} > \alpha^{Bertrand} > \alpha^{Auction} > \alpha^{MonComp} $$
+**Monopolistic competition:**
+$$
+m_j^{-1} \propto 1.
+$$
 
-*Bayesian Identification Strategy.*
-This corollary illuminates the identification mechanism. Each model "prefers" a different region of the parameter space to explain the supply-side data (margins). However, the demand-side data (prices and shares) provides an independent anchor for $\alpha$.
+These mappings are the identification engine of the paper. The models are not merely alternative regressions or alternative priors. They impose different economic restrictions on the relationship between shares and margins.
 
-In our Bayesian framework, the models compete to explain the joint distribution of data. The posterior probability favors the model that minimizes the tension between the two data sources—effectively, the model that **"does the best job" of predicting the observed margins** given the constraints imposed by the demand system. For example, if the demand data pin down a moderate $\alpha$, but the accounting margins are high, the Cournot model (which predicts high margins naturally) will have a higher likelihood than the Bertrand or Auction models, which would require an implausibly low $\alpha$ (high markup) to fit the same data.
+## Proposition 1: Structural Margin Hierarchy
 
-# Bayesian Methodology
+**Proposition 1.** *For a fixed interior pair $(s_j, s_0)$ with $s_j > 0$ and $s_0 \in (0,1)$, the candidate conduct models imply the following strict ordering of markup functions:*
+$$
+\kappa_j^{Cournot}(s_j, s_0)
+>
+\kappa_j^{Bertrand}(s_j, s_0)
+>
+\kappa_j^{Auction}(s_j, s_0)
+>
+\kappa_j^{MonComp}(s_j, s_0).
+$$
 
-## Model Estimation
+*Proof.* Cournot competition scales the effect of own share by the outside share, yielding a markup factor proportional to $s_j/s_0$. Bertrand competition internalizes differentiated-product substitution and yields a markup factor proportional to $(1 - s_j(1-s_0))^{-1}-1$. Since $s_0<1$, the Cournot scaling is larger for interior shares. For the auction model, let $x=s_j(1-s_0)$. The inequality $-\log(1-x)>x$ for $x \in (0,1)$ implies that the auction markup factor lies below the Bertrand markup factor. Monopolistic competition eliminates strategic interaction, leaving a constant own-effect benchmark. Combining these comparisons gives the stated ordering.
 
-We estimate each model $m \in \{ \text{Cournot, Bertrand, Auction, MonComp} \}$ using a Bayesian hierarchical framework implemented in Stan. For each model, we specify the joint likelihood of observed market shares and margins. The structural parameters (including $\alpha$ and costs) are estimated simultaneously.
+**Remark (Distinction from merger comparative statics).** The ordering in Proposition 1 is distinct from the comparative statics underlying merger thresholds. Prior work shows that different conduct models imply different counterfactual price effects for a given change in concentration. Proposition 1 instead establishes that these models also imply distinct relationships between observed market shares and margins in equilibrium. Because margins are observable, or can be proxied, these relationships generate testable restrictions that allow the data to discipline beliefs over conduct even in the absence of merger variation.
+
+**Corollary 1.** *For a fixed dataset of shares, prices, and observed margins, the values of $\alpha$ required to rationalize those margins satisfy*
+$$
+\alpha^{Cournot} > \alpha^{Bertrand} > \alpha^{Auction} > \alpha^{MonComp}.
+$$
+
+The corollary explains how margins identify conduct. Each model prefers a different region of the parameter space to reconcile observed margins with observed shares. The demand side, through prices and shares, provides a separate anchor for $\alpha$. Posterior model probabilities are therefore disciplined by the tension between the demand-implied values of $\alpha$ and the supply-side markup mapping implied by each conduct model.
+
+# Information Sets and Identification
+
+The strength of this identification mechanism depends on the data available to the analyst.
+
+**One market, one period.** This is the canonical merger-review environment. Shares and prices identify relative mean utilities, but without margins they do not separately identify $\alpha$, unobserved quality, the outside share, or conduct. Observed margin proxies add discipline because each conduct model implies a different mapping from $(s_j,s_0,\alpha)$ to margins. Even then, inference remains weak and relies heavily on functional form, priors, and cross-firm variation within the market.
+
+**One market, multiple periods.** Time-series variation helps separate persistent firm quality from price sensitivity and allows margins to discipline the same market under changing conditions. This improves inference about $\alpha$ and $s_0$, but the analysis remains tied to a single market.
+
+**Multiple markets, one period.** Cross-market variation makes it possible to learn whether the same conduct model explains different market structures. This setting begins to identify the distribution of conduct across markets, rather than only the conduct model for one case.
+
+**Multiple markets, multiple periods.** The full hierarchical setting combines cross-market and time-series variation. It allows partial pooling of parameters such as $\alpha$ and $s_0$, separates case-specific noise from persistent conduct patterns, and provides the most informative prior for future case-level merger review.
+
+This information-set ladder is central to the interpretation of Bayesian merger analysis. Case-level review often occurs in the weakest environment, while broader empirical work can use richer data to learn priors over conduct and demand that improve future adjudication. These cases form a nested identification ladder. The same structural model is estimated in each environment, but the extent to which the likelihood disciplines parameters and conduct varies sharply with the available variation. This allows us to separate what is learned from the data from what is imposed by structure or priors.
+
+# Bayesian Framework
+
+The theoretical results above establish that conduct models imply distinct mappings between shares and margins. We now embed those mappings in a Bayesian likelihood.
+
+## Likelihood
+
+Let $D=\{s_j,p_j,m_j\}_{j=1}^J$ denote observed shares, prices, and margins or margin proxies in a market. For each conduct model $M_k \in \{\text{Bertrand}, \text{Cournot}, \text{Auction}, \text{MonComp}\}$, the structural model implies a joint demand-supply system:
+$$
+s_j = \exp(\delta_j + \log s_0) + \varepsilon_j^{(s)}, \quad
+\delta_j = x_j\beta - \alpha p_j + \xi_j,
+$$
+and
+$$
+m_j^{-1} = \frac{1}{\alpha}\kappa_j^{(k)}(s_j,s_0) + \varepsilon_j^{(m)}.
+$$
+Because $\kappa_j^{(k)}(\cdot)$ differs across conduct models as characterized in Proposition 1, the margin equation imposes model-specific restrictions linking observed shares to margins. These restrictions generate differences in the joint likelihood across models.
+
+We allow the share and margin disturbances to be correlated:
+$$
+\begin{pmatrix}
+\varepsilon_j^{(s)} \\
+\varepsilon_j^{(m)}
+\end{pmatrix}
+\sim
+\mathcal{N}\left(
+\begin{pmatrix}
+0 \\
+0
+\end{pmatrix},
+\begin{pmatrix}
+\sigma_s^2 & \rho\sigma_s\sigma_m \\
+\rho\sigma_s\sigma_m & \sigma_m^2
+\end{pmatrix}
+\right).
+$$
+
+The likelihood under model $M_k$ is therefore the joint fit of shares and margins:
+$$
+P(D \mid \theta_k, M_k)
+=
+\prod_{j=1}^J
+f_s(s_j \mid \theta_k, M_k)
+f_m(m_j \mid s_j,\theta_k,M_k),
+$$
+where $\theta_k$ includes $\alpha$, $s_0$, demand shifters, latent quality, variance parameters, and the correlation parameter $\rho$.
+
+## Priors and Hierarchical Structure
+
+We use weakly informative priors for structural parameters. The price sensitivity $\alpha$ is restricted to be positive, the outside share $s_0$ is restricted to the unit interval, latent quality terms are regularized hierarchically, and the variance parameters are constrained to be positive. In multi-market or multi-period settings, parameters such as $\alpha$ and $s_0$ may vary hierarchically across events, markets, or years, allowing richer information sets to discipline case-level inference through partial pooling.
 
 ## Model Comparison and Averaging
 
-We account for model uncertainty through Bayesian Model Averaging (BMA). We compute the posterior model probability $P(M_k | D)$ for each model $k$:
+For each conduct model, we compute the marginal likelihood
 $$
-P(M_k | D) = \frac{P(D | M_k) P(M_k)}{\sum_{j} P(D | M_j) P(M_j)}
+P(D \mid M_k) =
+\int P(D \mid \theta_k, M_k)P(\theta_k \mid M_k)d\theta_k.
 $$
-where $P(D | M_k)$ is the marginal likelihood of the data under model $k$. We typically assume uniform prior probabilities $P(M_k)$.
+Posterior model probabilities are then
+$$
+P(M_k \mid D)
+=
+\frac{P(D \mid M_k)P(M_k)}
+{\sum_{\ell}P(D \mid M_{\ell})P(M_{\ell})}.
+$$
+We typically use uniform prior probabilities over conduct models.
 
-Predictions (e.g., merger price effects $\Delta p$) are then averaged:
+Predicted merger effects are averaged over conduct models:
 $$
-E[\Delta p | D] = \sum_k E[\Delta p | D, M_k] P(M_k | D)
+E[\Delta p \mid D]
+=
+\sum_k E[\Delta p \mid D,M_k]P(M_k \mid D).
 $$
 
-# Bayesian Implementation
+The object being averaged is not a reduced-form forecast. It is a merger counterfactual solved under a distinct equilibrium model. The resulting BMA estimate is therefore a decision-theoretic object: the expected merger effect after accounting for uncertainty over both structural parameters and firm conduct.
 
-The models are estimated using the HMC NUTS sampler in Stan.
-*   **Likelihood**: We model the joint distribution of demand (log-shares) and supply (inverse margins).
-*   **Priors**: We use weakly informative priors for structural parameters.
-*   **Computation**: We approximate the marginal likelihoods using bridge sampling or LOO-CV to compute Bayes Factors.
+## Implementation
+
+The models are estimated in Stan using the HMC NUTS sampler. We approximate model evidence using marginal likelihood or predictive-fit criteria, depending on the application. The key empirical comparison is the joint ability of each conduct model to reconcile observed shares, prices, and margins.
 
 # Application: The Banking Industry
 
-We apply our Bayesian framework to the U.S. banking industry, a sector that is foundational to modern antitrust enforcement. The "structural presumption"—the legal doctrine that high market concentration is presumptive evidence of anticompetitive harm—originated in the Supreme Court's seminal *United States v. Philadelphia National Bank* (1963) decision. Despite this long history, the industry remains a subject of intense debate regarding the appropriate model of competition. Are banks setting deposit rates (Bertrand), competing for a quantity of loanable funds (Cournot), or bidding for customer relationships (Auctions)?
+We apply the framework to the U.S. banking industry, a sector where merger review, market definition, and concentration screens have long been central policy questions. Banking is especially useful for this paper because it combines institutional importance with unusually rich information on shares, prices, and margin proxies. That combination lets us study exactly the object emphasized above: how conduct models reconcile demand-side data with supply-side margins.
 
-Aside from its legal significance, banking offers a unique empirical laboratory for testing structural models. As noted by @TaraginPanhans2023, it is one of the few environments where researchers can observe the full triad of necessary data—prices (interest rates), quantities (deposit shares), and margins (net interest margins)—continuously over long time horizons.
+The industry is also theoretically ambiguous. Banks may compete over deposit rates in a differentiated-products Bertrand environment, over quantities of loanable funds in a Cournot-like environment, or through relationship-based bidding that resembles auction competition. Because each of these conduct assumptions can be economically plausible, banking is a natural setting in which to treat conduct as an object of inference rather than as a maintained assumption.
 
-*   **Mergers**: The industry has undergone massive consolidation, providing a rich set of "natural experiments" for merger simulation.
-*   **Data Availability**: Unlike most industries where marginal costs are unobservable, banking accounting data (Call Reports) allows for the construction of reliable proxies for variable costs and margins.
-*   **Local Markets**: The clear definition of geographic markets (e.g., Federal Reserve banking markets) allows for cross-sectional variation that acts as a powerful source of identification.
-
-This combination of data richness and theoretical ambiguity makes banking the ideal setting to demonstrate the power of Bayesian Model Averaging.
+This application has three advantages. First, the legal doctrine of the structural presumption originates in the Supreme Court's *Philadelphia National Bank* decision, making banking directly relevant to merger policy. Second, banking accounting data allow construction of margin proxies that are rarely available in other industries. Third, local banking markets generate cross-sectional variation that can be used to discipline structural parameters and model probabilities.
 
 # Case Study: United States v. Philadelphia National Bank (1963)
 
@@ -179,7 +232,7 @@ We evaluate four structural models of competition: **Bertrand** (differentiated 
 
 To ensure a fair comparison, we employ **model-specific data-calibrated priors**. Since the relationship between margins and shares differs fundamentally across models (e.g., Cournot implies higher margins than Bertrand for the same share), imposing a common $\alpha$ prior can bias model selection. Instead, we derive weakly informative priors for each model based on the observed data extremes, allowing each theory to be tested on its own terms.
 
-We compare these models using Leave-One-Out Cross-Validation (LOO-CV), which estimates the out-of-sample predictive accuracy. The results for the PNB market are summarized below.
+We compare these models using model evidence and predictive fit. The results for the PNB market are summarized below.
 
 ```{r pnb_bma_table, echo=FALSE, message=FALSE, warning=FALSE}
 library(readr)
@@ -199,20 +252,11 @@ kable(pnb_bma %>% select(Model, LogML, Divergences, bayes_factor_vs_best, poster
   kable_styling(latex_options = c("striped", "hold_position"))
 ```
 
-The data favors the **Cournot** model by Log-Marginal Likelihood, suggesting it offers the best balance of fit and parsimony for the observed margins. The **Bertrand** and **Auction** models, while structurally sound, face a steeper penalty for their complexity in this single-year slice.
+The data favor the **Cournot** model by log marginal likelihood, indicating that its share-margin mapping best reconciles the observed 1960 PNB data under the specified priors. The **Bertrand** and **Auction** models remain economically plausible, but they require different regions of the parameter space to match the same margins and therefore receive lower posterior weight in this single-year information set.
 
- **Structural Interpretation:**
- The structural parameter $\alpha$ is estimated to be approximately **0.37 - 0.44** across models. This is a significant departure from the pooled estimates (which were near zero), indicating that the single-year 1960 data allows for a more flexible demand elasticity estimate ($\alpha \approx 0.40$ implies a demand elasticity around 1.0 at the mean).
- 
- The **Bertrand** and **Auction** models have stabilized significantly with the latest fixes (conditional parameter removal), showing ~100-150 divergences compared to thousands previously.
+**Structural interpretation.** The structural parameter $\alpha$ is estimated to be approximately **0.37-0.44** across models. This range is consistent with the identification logic above: different conduct models imply different markup mappings, so they rationalize the same observed margins with different demand curvature. The estimated outside share is small across models, consistent with the narrow market definition used in the case.
 
-**Convergence Diagnostics:**
-- **MonCom:** ~169 divergences (Acceptable given complexity)
- - **Bertrand:** ~156 divergences (Stable)
- - **Cournot:** ~63 divergences (Excellent)
- - **Auction:** ~119 divergences (Stable)
-
-These diagnostics confirm that the structural fixes successfully stabilized the sampler.
+**Convergence diagnostics.** The sampler produces remaining divergences across models, especially in the most weakly identified specifications. We therefore interpret the single-year PNB estimates as an intentionally demanding case-level exercise rather than as a fully saturated panel estimate.
 
 ### Bayesian Model Averaging (BMA)
 
@@ -295,6 +339,8 @@ if (file.exists(sim_file)) {
 }
 ```
 
+The difference between Bayesian and single-model predictions is economically meaningful. In the current 1960 PNB snapshot, standard Bertrand calibration predicts a mean effect of approximately **-26.8%**, while the posterior-weighted Bayesian model average is approximately **-116.5%**. The gap arises because the observed share-margin relationship places substantial posterior weight on Cournot conduct. This illustrates the main policy point of the paper: conditioning on a single conduct model can materially change the counterfactual conclusion even in a canonical case such as PNB.
+
 ### Remark: Neutrality of Monopolistic Competition
 
 Formally, the zero price effect in the Monopolistic Competition model arises from the assumption of strategic independence. Consider the profit maximization problem for firm $j$:
@@ -311,13 +357,11 @@ Because the model assumes $\frac{\partial q_k}{\partial p_j} = 0$, the "Cross-Ef
 
 
 
-# Generalization: Supreme Court Mergers
+# External Validation: Historic Banking Mergers
 
-To validate the robustness of our approach beyond the PNB case, we applied the **Decoupled + Cutoff Model** to a panel of six historic banking mergers adjudicated by the Supreme Court. This analysis tests whether our structural specification—specifically the use of a "Cutoff Share" to separate strategic firms from the competitive fringe—scales effectively across markets of varying size and concentration.
+PNB is the flagship application because it is the canonical antitrust banking case and the origin of the structural presumption. We also use other historic Supreme Court banking mergers as a limited external validation exercise. The purpose of this extension is not to relitigate those cases or to develop a separate legal account of Supreme Court merger doctrine. The purpose is to ask whether the same Bayesian conduct framework can be estimated in related banking markets with different sizes and concentration levels.
 
-## Pooled Analysis Results
-
-We estimated the model on the full panel of data (typically 6-7 years surrounding the merger) for each case. We also estimated the **Coupled** parameter correlations, finding that the correlation $\rho$ between demand and supply errors is consistently close to zero. The results below confirm that the model identifies a consistent equilibrium in every market. Notably, the **Cutoff Share** ($\gamma$) remains stable in the range of 0.8% to 2.8%, effectively filtering out the long tail of small banks in fragmented markets (e.g., Houston, Philadelphia).
+In this broader exercise, the cutoff/fringe specification separates banks that appear to participate strategically from the long tail of very small institutions. This matters in fragmented banking markets, where many small banks contribute observations but may not discipline strategic conduct in the same way as larger competitors. The multi-case setting is therefore best interpreted as movement along the information-set ladder: from a single PNB cross-section toward a richer panel that can learn more about the distribution of conduct across markets.
 
 ```{r sc_results, echo=FALSE, message=FALSE, warning=FALSE}
 # Load Supreme Court Results (Coupled)
@@ -329,16 +373,20 @@ f_decoupled <- "../results/sc_mergers_named_fringe.csv"
 cat("**Supreme Court analysis results pending...** (Data not yet loaded)")
 ```
 
-This successful generalization demonstrates that the instability observed in the naive Bertrand model is not unique to PNB but is a structural feature of banking data that requires a robust mechanism (like our Cutoff specification) to resolve.
+This extension provides a check on external relevance. If the framework performs similarly across related banking markets, then the PNB results are less likely to be an artifact of a single historical case. The central contribution remains the Bayesian treatment of conduct uncertainty in merger simulation.
+
+This extension should therefore be interpreted as movement along the information-set ladder, rather than as a separate exercise in legal interpretation.
 
 # Conclusion
-We have presented a Bayesian framework for merger review that explicitly accounts for model uncertainty. By shifting the focus from selecting a single "best" model to averaging across a set of plausible candidate theories, we offer a more robust path for antitrust enforcement.
+We have presented a Bayesian framework for merger review that explicitly accounts for uncertainty over firm conduct. The framework shifts the analysis from selecting a single "best" model to estimating posterior beliefs over economically distinct conduct models and carrying those beliefs into merger counterfactuals.
+
+More broadly, the framework suggests that merger analysis should be viewed as inference under model uncertainty, rather than as simulation under a maintained conduct assumption.
 
 ## Policy Implications
-Our results suggest that the current practice of relying on a single structural model (often Bertrand) may lead to overconfident and potentially biased predictions of merger effects. In the banking sector application, we find that BMA often yields more conservative harm estimates than the pure Bertrand baseline but validates risk in areas where alternative models (like Cournot) might otherwise be overlooked. This approach provides a rigorous, data-driven path to resolving model ambiguity in individual merger cases, moving beyond the "all-or-nothing" nature of current enforcement debates.
+Our results suggest that relying on a single structural model, often Bertrand, can produce overconfident merger predictions when conduct is uncertain. The Bayesian approach does not eliminate the need for judgment or identifying assumptions, especially in one-market, one-period cases. It does make those assumptions explicit, quantifies how much the data support alternative conduct models, and reports merger effects that incorporate model uncertainty.
 
 ## Future Directions
-While this paper focuses on case-specific adjudication, a natural extension is to apply this BMA framework to the design of **Merger Screening Thresholds**. Future work could use the galaxy of BMA-weighted predictions to derive "conduct-robust" concentration screens (e.g., HHI levels) that minimize decision error across a portfolio of uncertain conduct types. Additionally, extending the framework to include more flexible demand specifications (e.g., Random Coefficients Logit) would further validate its utility.
+While this paper focuses on case-specific adjudication, a natural extension is to use richer multi-market and multi-period data to construct priors for future merger reviews. Such priors could inform conduct-robust screening thresholds and reduce the instability of rules based only on concentration measures. Extending the framework to more flexible demand systems, such as random coefficients Logit, is another important direction.
 
 # Appendix A: Data Quality and Outlier Analysis
 
